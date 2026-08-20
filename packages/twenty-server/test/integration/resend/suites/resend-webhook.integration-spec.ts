@@ -16,6 +16,9 @@ const SIGNING_SECRET = `whsec_${SECRET_BYTES.toString('base64')}`;
 
 const RESEND_WEBHOOK_PATH = '/webhooks/messaging/resend';
 
+const SUPPRESSION_WAIT_TIMEOUT_MS = 20_000;
+const SUPPRESSION_POLL_INTERVAL_MS = 250;
+
 const signRawBody = ({
   svixId,
   svixTimestamp,
@@ -51,12 +54,30 @@ const postResendWebhook = (
 describe('Resend webhook (integration)', () => {
   let unsubscribeTokenService: UnsubscribeTokenService;
 
-  const findSuppressionReasons = async (emailAddress: string) => {
+  const readSuppressionReasons = async (emailAddress: string) => {
     const suppressions = await getCoreRepository<MessageSuppressionEntity>(
       MessageSuppressionEntity,
     ).findBy({ workspaceId: SEED_APPLE_WORKSPACE_ID, emailAddress });
 
     return suppressions.map((suppression) => suppression.reason);
+  };
+
+  const findSuppressionReasons = async (
+    emailAddress: string,
+    { expectedCount = 1 }: { expectedCount?: number } = {},
+  ) => {
+    const deadline = Date.now() + SUPPRESSION_WAIT_TIMEOUT_MS;
+    let reasons = await readSuppressionReasons(emailAddress);
+
+    while (reasons.length < expectedCount && Date.now() < deadline) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, SUPPRESSION_POLL_INTERVAL_MS),
+      );
+
+      reasons = await readSuppressionReasons(emailAddress);
+    }
+
+    return reasons;
   };
 
   beforeAll(async () => {
@@ -127,7 +148,9 @@ describe('Resend webhook (integration)', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await findSuppressionReasons(emailAddress)).toEqual([]);
+    expect(
+      await findSuppressionReasons(emailAddress, { expectedCount: 0 }),
+    ).toEqual([]);
   }, 60000);
 
   it('suppresses nothing for a bounce without a workspace tag', async () => {
@@ -145,7 +168,9 @@ describe('Resend webhook (integration)', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await findSuppressionReasons(emailAddress)).toEqual([]);
+    expect(
+      await findSuppressionReasons(emailAddress, { expectedCount: 0 }),
+    ).toEqual([]);
   }, 60000);
 
   it('suppresses the sender of a received email addressed to the unsubscribe mailbox', async () => {
