@@ -39,3 +39,15 @@ export const CAMPAIGN_SEND_RETRY_BACKOFF: QueueJobBackoffOptions = {
   initialDelayMilliseconds: 5_000,
   jitter: 0.5,
 };
+
+export const RECONCILE_WORKSPACE_CAMPAIGN_STATS_JOB =
+  'ReconcileWorkspaceCampaignStatsJob';
+
+export const CAMPAIGN_JOB_RETRY_LIMIT = 3;
+
+export const CAMPAIGN_STATS_REFRESH_LOCK_GRACE_MS = 2_000;
+
+export const CAMPAIGN_STATS_REFRESH_LOCK_TTL_MS =
+  CAMPAIGN_STATS_REFRESH_DEBOUNCE_MS + CAMPAIGN_STATS_REFRESH_LOCK_GRACE_MS;
+
+export const CAMPAIGN_STATS_RECONCILIATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;

@@ -59,6 +59,7 @@ export class EmailingSendResolver {
   async sendEmailViaEmailingDomain(
     @Args('input') input: SendEmailViaDomainInput,
     @AuthWorkspace() currentWorkspace: WorkspaceEntity,
+    @AuthUserWorkspaceId() userWorkspaceId: string,
   ): Promise<SendEmailViaDomainOutputDTO> {
     this.emailGroupAccessService.validateEmailGroupAccessOrThrow();
     await this.emailBillingService.validateEmailCreditsOrThrow(
@@ -69,11 +70,12 @@ export class EmailingSendResolver {
     const result = await this.emailingDomainSenderService.sendEmail(
       currentWorkspace.id,
       emailingDomainId,
-      content,
+      { ...content, sendKind: 'TRANSACTIONAL' },
     );
 
     await this.emailBillingService.billSentEmails({
       workspaceId: currentWorkspace.id,
+      userWorkspaceId,
       sentEmailCount: 1,
     });
 

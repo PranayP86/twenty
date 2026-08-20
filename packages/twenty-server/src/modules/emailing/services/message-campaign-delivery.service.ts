@@ -158,6 +158,7 @@ export class MessageCampaignDeliveryService {
       messageId,
       recipientEmail,
       emailingDomainId,
+      userWorkspaceId,
     } = data;
 
     const variables =
@@ -171,10 +172,10 @@ export class MessageCampaignDeliveryService {
       variables,
     });
 
-    const hasEmailCredits =
-      await this.emailBillingService.hasEmailCredits(workspaceId);
+    const { hasCredits, currentBillingSubscription } =
+      await this.emailBillingService.resolveEmailCreditContext(workspaceId);
 
-    if (!hasEmailCredits) {
+    if (!hasCredits) {
       await messageRepository.update(
         {
           id: messageId,
@@ -198,6 +199,7 @@ export class MessageCampaignDeliveryService {
           subject,
           text: plainText,
           html,
+          sendKind: 'MARKETING',
           unsubscribeTopicId: campaign.unsubscribeTopicId ?? undefined,
         },
       );
@@ -248,10 +250,20 @@ export class MessageCampaignDeliveryService {
       return;
     }
 
-    await this.emailBillingService.billSentEmails({
-      workspaceId,
-      sentEmailCount: 1,
-    });
+    await this.emailBillingService
+      .billSentEmails({
+        workspaceId,
+        sentEmailCount: 1,
+        userWorkspaceId,
+        currentBillingSubscription,
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Campaign ${campaignId} delivered message ${messageId} but failed to bill it, so this send is unbilled: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
 
     const associationRepository =
       await this.globalWorkspaceOrmManager.getRepository(
