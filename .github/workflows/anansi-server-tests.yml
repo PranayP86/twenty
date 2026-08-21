@@ -23,8 +23,15 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         uses: ./.github/actions/yarn-install
-      - name: Build twenty-shared
-        run: npx nx build twenty-shared
+      # ANANSI PATCH: build twenty-server's full workspace-dependency set
+      # (twenty-shared, twenty-emails, twenty-client-sdk — see
+      # packages/twenty-server/package.json's workspace:* deps, the same set
+      # packages/twenty-docker/twenty/Dockerfile focuses/installs for
+      # twenty-server) so nothing transitively required at module-load time
+      # (e.g. approved-access-domain.service.ts importing twenty-emails) is
+      # missing when jest requires sign-in-up.service.ts.
+      - name: Build workspace dependencies
+        run: npx nx run-many --target=build --projects=twenty-shared,twenty-emails,twenty-client-sdk
       - name: Run Anansi server tests
         run: |
           npx jest --config packages/twenty-server/jest.config.mjs --ci --runInBand \
