@@ -1,0 +1,31 @@
+name: anansi-server-tests
+
+on:
+  push:
+    branches: [anansi]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# ANANSI PATCH: test gate for server-side Anansi patches (starting with the
+# allowlist-gated workspace-creation check in
+# packages/twenty-server/src/engine/core-modules/auth/services/sign-in-up.service.ts
+# and anansi-allowlist.service.ts). Runs only the Anansi-owned spec files —
+# not the full upstream twenty-server suite (see .github/workflows/ci-server.yaml
+# for that, which only triggers on pull_request/merge_group, not push).
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        uses: ./.github/actions/yarn-install
+      - name: Build twenty-shared
+        run: npx nx build twenty-shared
+      - name: Run Anansi server tests
+        run: |
+          npx jest --config packages/twenty-server/jest.config.mjs --ci --runInBand \
+            "anansi-allowlist\.service\.spec\.ts|sign-in-up\.service\.spec\.ts"
