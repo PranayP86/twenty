@@ -155,6 +155,21 @@ export const SignInUp = () => {
         <StyledLoaderContainer>
           {clientConfigApiStatus.isLoadedOnce &&
             isRedeemingSSOExchangeToken && <SignInUpSSOExchangeTokenEffect />}
+          {/* ANANSI PATCH: mount the post-login navigation effect so a
+              logged-in user at step Init actually leaves this page instead
+              of being stuck on the loader forever. Mirrors the GlobalScope
+              and fallback branches below, which both use this same effect.
+              The WorkspaceScope branch (isDefined(workspacePublicData) &&
+              isOnAWorkspace) is deliberately excluded: its effect has no
+              isLogged-navigation logic, and that branch only renders inside
+              WorkspaceAppProviders, where the sibling PageChangeEffect
+              already navigates a logged-in user off this route. */}
+          {clientConfigApiStatus.isLoadedOnce &&
+            isLogged &&
+            signInUpStep === SignInUpStep.Init &&
+            !(isDefined(workspacePublicData) && isOnAWorkspace) && (
+              <SignInUpGlobalScopeFormEffect />
+            )}
           <Loader color="gray" />
         </StyledLoaderContainer>
       );
