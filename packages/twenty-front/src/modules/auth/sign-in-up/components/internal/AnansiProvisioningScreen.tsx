@@ -31,6 +31,8 @@ import {
 } from '~/generated-metadata/graphql';
 import { getWorkspaceUrl } from '~/utils/getWorkspaceUrl';
 import { isGraphqlErrorOfType } from '~/utils/is-graphql-error-of-type.util';
+// ANANSI PATCH (WS-B): provision failures block + retry
+import { sleep } from '~/utils/sleep';
 
 const StyledContainer = styled.div`
   align-items: center;
@@ -58,7 +60,15 @@ const StyledButtonContainer = styled.div`
   width: 100%;
 `;
 
-type ProvisioningPhase = 'creating' | 'denied' | 'requestSent' | 'error';
+// ANANSI PATCH (WS-B): provision failures block + retry — 'provisionError' is
+// a distinct blocking phase from 'error' (workspace creation itself failed):
+// here the workspace already exists, only the Core provision call failed.
+type ProvisioningPhase =
+  | 'creating'
+  | 'denied'
+  | 'requestSent'
+  | 'error'
+  | 'provisionError';
 
 // Workspace name = email local-part, capitalized. Dumb and predictable on
 // purpose (e.g. jane.doe@gmail.com -> "Jane.doe") — there is no form for the
@@ -68,10 +78,11 @@ const getWorkspaceDisplayNameFromEmail = (email: string): string => {
   return localPart.charAt(0).toUpperCase() + localPart.slice(1);
 };
 
-// Best-effort call to Anansi Core. A failure here (401/403/5xx/timeout/
-// network) never blocks the redirect into the workspace — Core can
-// re-provision on its own next check — but it is logged so it's not silent.
-const provisionWorkspace = async (accessToken: string): Promise<void> => {
+// ANANSI PATCH (WS-B): provision failures block + retry — this call used to
+// be best-effort (logged, never blocked the redirect). It now reports
+// success/failure so the caller can hold the user out of the workspace
+// until Core has actually provisioned it.
+const provisionWorkspace = async (accessToken: string): Promise<boolean> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
@@ -88,16 +99,35 @@ const provisionWorkspace = async (accessToken: string): Promise<void> => {
 
     if (!response.ok) {
       // oxlint-disable-next-line no-console
-      console.error(
-        `ANANSI: /v1/provision returned ${response.status}; core will re-provision on next check`,
-      );
+      console.error(`ANANSI: /v1/provision returned ${response.status}`);
+      return false;
     }
+
+    return true;
   } catch (error) {
     // oxlint-disable-next-line no-console
     console.error('ANANSI: /v1/provision request failed', error);
+    return false;
   } finally {
     clearTimeout(timeoutId);
   }
+};
+
+// ANANSI PATCH (WS-B): provision failures block + retry — one silent
+// automatic retry after a short delay absorbs transient blips (a cold
+// Core pod, a dropped connection) before surfacing the blocking card.
+const PROVISION_RETRY_DELAY_MS = 2_000;
+
+const provisionWorkspaceWithSilentRetry = async (
+  accessToken: string,
+): Promise<boolean> => {
+  if (await provisionWorkspace(accessToken)) {
+    return true;
+  }
+
+  await sleep(PROVISION_RETRY_DELAY_MS);
+
+  return provisionWorkspace(accessToken);
 };
 
 export const AnansiProvisioningScreen = () => {
@@ -118,6 +148,17 @@ export const AnansiProvisioningScreen = () => {
 
   const [phase, setPhase] = useState<ProvisioningPhase>('creating');
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
+  // ANANSI PATCH (WS-B): provision failures block + retry — the workspace
+  // and login token already exist by the time provisioning can fail, so a
+  // manual retry only needs to re-call provision, not redo signup. Kept in
+  // a ref (not state) since it's write-once-per-attempt-cycle context, not
+  // something a render should react to.
+  const provisionRetryContextRef = useRef<{
+    accessToken: string;
+    workspaceUrl: string;
+    loginToken: string;
+  } | null>(null);
+  const [isRetryingProvision, setIsRetryingProvision] = useState(false);
   const hasStartedRef = useRef(false);
   const isMountedRef = useRef(true);
 
@@ -190,7 +231,27 @@ export const AnansiProvisioningScreen = () => {
         }
 
         if (isDefined(accessToken)) {
-          await provisionWorkspace(accessToken);
+          // ANANSI PATCH (WS-B): provision failures block + retry — a
+          // failed provision (after the silent retry) now stops the flow
+          // here instead of falling through to the redirect below.
+          const isProvisioned = await provisionWorkspaceWithSilentRetry(
+            accessToken,
+          );
+
+          if (!isProvisioned) {
+            if (!isMountedRef.current) {
+              return;
+            }
+
+            provisionRetryContextRef.current = {
+              accessToken,
+              workspaceUrl,
+              loginToken: loginToken.token,
+            };
+            setIsCreatingWorkspace(false);
+            setPhase('provisionError');
+            return;
+          }
         } else {
           // oxlint-disable-next-line no-console
           console.error(
@@ -245,6 +306,42 @@ export const AnansiProvisioningScreen = () => {
   const handleRetry = () => {
     hasStartedRef.current = false;
     setPhase('creating');
+  };
+
+  // ANANSI PATCH (WS-B): provision failures block + retry — the workspace
+  // already exists (server-side idempotent), so retry re-calls provision
+  // only; it does not go through handleRetry's full signup re-run above.
+  const handleRetryProvision = async () => {
+    const retryContext = provisionRetryContextRef.current;
+
+    if (!isDefined(retryContext) || isRetryingProvision) {
+      return;
+    }
+
+    setIsRetryingProvision(true);
+
+    const isProvisioned = await provisionWorkspace(retryContext.accessToken);
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setIsRetryingProvision(false);
+
+    if (!isProvisioned) {
+      // Stay on the provisionError card; the context ref is untouched so
+      // another click can try again.
+      return;
+    }
+
+    if (isMultiWorkspaceEnabled) {
+      await redirectToWorkspaceDomain(
+        retryContext.workspaceUrl,
+        AppPath.Verify,
+        { loginToken: retryContext.loginToken },
+        '_self',
+      );
+    }
   };
 
   const handleRequestAccess = () => {
@@ -315,6 +412,33 @@ export const AnansiProvisioningScreen = () => {
         </StyledTextContainer>
         <StyledButtonContainer>
           <MainButton title={t`Try again`} onClick={handleRetry} fullWidth />
+        </StyledButtonContainer>
+      </StyledContainer>
+    );
+  }
+
+  // ANANSI PATCH (WS-B): provision failures block + retry — distinct card
+  // from the generic 'error' phase above: the workspace was created, only
+  // the Core provision call failed, so the user must not fall through into
+  // a half-provisioned workspace.
+  if (phase === 'provisionError') {
+    return (
+      <StyledContainer>
+        <AnimatedEaseIn>
+          <OnboardingModalCircularIcon Icon={IconAlertTriangle} />
+        </AnimatedEaseIn>
+        <StyledTextContainer>
+          <Title animate noMarginTop>
+            {t`Couldn't finish setting up your workspace`}
+          </Title>
+        </StyledTextContainer>
+        <StyledButtonContainer>
+          <MainButton
+            title={t`Try again`}
+            onClick={handleRetryProvision}
+            disabled={isRetryingProvision}
+            fullWidth
+          />
         </StyledButtonContainer>
       </StyledContainer>
     );
