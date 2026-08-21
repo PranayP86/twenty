@@ -1,6 +1,6 @@
 import { InMemoryCache } from '@apollo/client';
 import { useMemo, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 
 import { ApolloFactory, type Options } from '@/apollo/services/apollo.factory';
 import { ONGOING_USER_CREATION_PATHS } from '@/auth/constants/OngoingUserCreationPaths';
@@ -27,7 +27,6 @@ export const useApolloFactory = (options: Partial<Options> = {}) => {
   // oxlint-disable-next-line twenty/no-state-useref
   const apolloRef = useRef<ApolloFactory | null>(null);
 
-  const navigate = useNavigate();
   const setTokenPair = useSetAtomState(tokenPairState);
   const setIsCookieAuthActive = useSetAtomState(isCookieAuthActiveState);
   const [currentWorkspace, setCurrentWorkspace] = useAtomState(
@@ -88,7 +87,8 @@ export const useApolloFactory = (options: Partial<Options> = {}) => {
           if (isValidReturnToPath(path)) {
             setReturnToPath(path);
           }
-          navigate(AppPath.SignInUp);
+          // ANANSI PATCH: logout lands on the Anansi front door
+          window.location.assign('https://anansi.work');
         }
       },
       onAppVersionMismatch: (message) => {
