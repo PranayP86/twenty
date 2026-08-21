@@ -122,6 +122,12 @@ export const AnansiProvisioningScreen = () => {
   const isMountedRef = useRef(true);
 
   useEffect(() => {
+    // ANANSI PATCH: reset on (re-)mount, not only cleared in cleanup — under
+    // StrictMode's dev-only double-invoke this ref would otherwise get stuck
+    // `false` forever after the synthetic mount->cleanup->remount, silently
+    // swallowing every later setPhase('denied'/'error') call.
+    isMountedRef.current = true;
+
     return () => {
       isMountedRef.current = false;
     };
@@ -209,7 +215,13 @@ export const AnansiProvisioningScreen = () => {
           return;
         }
 
-        if (isGraphqlErrorOfType(error, 'FORBIDDEN_EXCEPTION')) {
+        // ANANSI PATCH: match only the allowlist-denial's dedicated subCode,
+        // not the generic FORBIDDEN_EXCEPTION — the workspace-count-limit
+        // throw (MAX_WORKSPACES_WITHOUT_ENTERPRISE_KEY) also uses
+        // FORBIDDEN_EXCEPTION and is not an allowlist denial; it must fall
+        // through to the transient/error retry path below, not this
+        // invite-only card.
+        if (isGraphqlErrorOfType(error, 'ANANSI_NOT_ALLOWLISTED')) {
           setIsCreatingWorkspace(false);
           setPhase('denied');
           return;

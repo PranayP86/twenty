@@ -28,6 +28,10 @@ export const authGraphqlApiExceptionHandler = (exception: AuthException) => {
     case AuthExceptionCode.INVALID_JWT_TOKEN_TYPE:
     case AuthExceptionCode.USER_ALREADY_EXISTS:
     case AuthExceptionCode.ENTERPRISE_VALIDITY_TOKEN_NOT_VALID:
+    // ANANSI PATCH: exception.code carries through as extensions.subCode via
+    // the single-arg ForbiddenError(exception) constructor below, so this
+    // reaches the client as subCode: 'ANANSI_NOT_ALLOWLISTED'.
+    case AuthExceptionCode.ANANSI_NOT_ALLOWLISTED:
       throw new ForbiddenError(exception);
     case AuthExceptionCode.GOOGLE_API_AUTH_DISABLED:
     case AuthExceptionCode.MICROSOFT_API_AUTH_DISABLED:

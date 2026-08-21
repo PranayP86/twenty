@@ -546,9 +546,14 @@ export class SignInUpService {
       return;
     }
 
+    // ANANSI PATCH: a dedicated code, not FORBIDDEN_EXCEPTION — that code is
+    // also thrown by assertWorkspaceCountWithinLimit below for an unrelated
+    // reason (the enterprise workspace cap), and the front end needs to tell
+    // the two apart to avoid mislabeling an allowlist-approved user as
+    // denied once the workspace count passes the cap.
     throw new AuthException(
       'Workspace creation is restricted to admins',
-      AuthExceptionCode.FORBIDDEN_EXCEPTION,
+      AuthExceptionCode.ANANSI_NOT_ALLOWLISTED,
       {
         userFriendlyMessage: msg`Workspace creation is restricted to admins`,
       },

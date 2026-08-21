@@ -2,10 +2,17 @@ import { i18n } from '@lingui/core';
 import { I18nProvider } from '@lingui/react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Provider as JotaiProvider } from 'jotai';
+// ANANSI PATCH: the component now calls useSearchParams() unconditionally
+// (admin-bypass gate) — it needs a Router ancestor or every render throws.
+import { MemoryRouter } from 'react-router-dom';
 import { SOURCE_LOCALE } from 'twenty-shared/translations';
 import { ThemeProvider } from 'twenty-ui/theme-constants';
 
 import { SignInUpWorkspaceCreationForm } from '@/auth/sign-in-up/components/internal/SignInUpWorkspaceCreationForm';
+// ANANSI PATCH: the admin-bypass gate requires both the query param below
+// and canAccessFullAdminPanel on currentUser to reach the stock form these
+// tests exercise.
+import { currentUserState } from '@/auth/states/currentUserState';
 import { isCreatingWorkspaceState } from '@/auth/states/isCreatingWorkspaceState';
 import { isMultiWorkspaceEnabledState } from '@/client-config/states/isMultiWorkspaceEnabledState';
 import {
@@ -13,6 +20,24 @@ import {
   resetJotaiStore,
 } from '@/ui/utilities/state/jotai/jotaiStore';
 import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
+import { OnboardingStatus } from '~/generated-metadata/graphql';
+
+// ANANSI PATCH: SignInUpWorkspaceCreationForm now renders AnansiProvisioningScreen
+// unless the current user is a server admin explicitly hitting the
+// ?action=create-new-workspace bypass — match that here so this file keeps
+// exercising the stock form below (StockSignInUpWorkspaceCreationForm).
+const mockAdminUser = {
+  id: 'fake-user-id',
+  email: 'admin@example.com',
+  supportUserHash: null,
+  canAccessFullAdminPanel: true,
+  canImpersonate: false,
+  onboardingStatus: OnboardingStatus.COMPLETED,
+  userVars: {},
+  firstName: 'fake-first-name',
+  lastName: 'fake-last-name',
+  hasPassword: true,
+};
 
 const createWorkspaceMock = jest.fn();
 const applySuggestionValueMock = jest.fn();
@@ -40,11 +65,16 @@ const setMultiWorkspaceEnabled = (isEnabled: boolean) => {
 const renderForm = () =>
   render(
     <JotaiProvider store={jotaiStore}>
-      <ThemeProvider colorScheme="light">
-        <I18nProvider i18n={i18n}>
-          <SignInUpWorkspaceCreationForm />
-        </I18nProvider>
-      </ThemeProvider>
+      {/* ANANSI PATCH: MemoryRouter supplies the Router context
+          useSearchParams() needs, with the admin-bypass query param already
+          set so the gate resolves to the stock form below. */}
+      <MemoryRouter initialEntries={['/?action=create-new-workspace']}>
+        <ThemeProvider colorScheme="light">
+          <I18nProvider i18n={i18n}>
+            <SignInUpWorkspaceCreationForm />
+          </I18nProvider>
+        </ThemeProvider>
+      </MemoryRouter>
     </JotaiProvider>,
   );
 
@@ -52,6 +82,8 @@ describe('SignInUpWorkspaceCreationForm', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetJotaiStore();
+    // ANANSI PATCH: admin bypass — see mockAdminUser comment above.
+    jotaiStore.set(currentUserState.atom, mockAdminUser);
     useWorkspaceSubdomainFieldMock.mockReturnValue({
       workspaceName: 'Apple',
       subdomain: 'apple',

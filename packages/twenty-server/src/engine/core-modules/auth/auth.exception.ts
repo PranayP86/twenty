@@ -36,6 +36,12 @@ export const AuthExceptionCode = appendCommonExceptionCode({
   TWO_FACTOR_AUTHENTICATION_VERIFICATION_REQUIRED:
     'TWO_FACTOR_AUTHENTICATION_VERIFICATION_REQUIRED',
   USER_ALREADY_EXISTS: 'USER_ALREADY_EXISTS',
+  // ANANSI PATCH: distinct subCode for the allowlist-gated workspace-creation
+  // denial (sign-in-up.service.ts's assertWorkspaceCreationAllowed) so the
+  // front end can tell it apart from the unrelated
+  // MAX_WORKSPACES_WITHOUT_ENTERPRISE_KEY throw, which also carries
+  // FORBIDDEN_EXCEPTION.
+  ANANSI_NOT_ALLOWLISTED: 'ANANSI_NOT_ALLOWLISTED',
 } as const);
 
 const getAuthExceptionUserFriendlyMessage = (
@@ -83,6 +89,9 @@ const getAuthExceptionUserFriendlyMessage = (
       return msg`A user with this email already exists.`;
     case AuthExceptionCode.ENTERPRISE_VALIDITY_TOKEN_NOT_VALID:
       return msg`Enterprise validity token is not valid.`;
+    // ANANSI PATCH
+    case AuthExceptionCode.ANANSI_NOT_ALLOWLISTED:
+      return msg`Workspace creation is restricted to admins`;
     case AuthExceptionCode.INTERNAL_SERVER_ERROR:
     case AuthExceptionCode.INVALID_DATA:
     case AuthExceptionCode.CLIENT_NOT_FOUND:

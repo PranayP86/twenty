@@ -1,3 +1,4 @@
+import { AuthExceptionCode } from 'src/engine/core-modules/auth/auth.exception';
 import { type AnansiAllowlistService } from 'src/engine/core-modules/auth/services/anansi-allowlist.service';
 import { SignInUpService } from 'src/engine/core-modules/auth/services/sign-in-up.service';
 import { type ExistingUserOrPartialUserWithPicture } from 'src/engine/core-modules/auth/types/signInUp.type';
@@ -114,9 +115,17 @@ describe('SignInUpService - allowlist-gated workspace creation', () => {
     const isApproved = jest.fn().mockResolvedValue(true);
     const { service } = buildService({ userWorkspaceCount: 1, isApproved });
 
-    await expect(callGate(service, existingNonAdminUser())).rejects.toThrow(
+    const rejection = callGate(service, existingNonAdminUser());
+
+    await expect(rejection).rejects.toThrow(
       'Workspace creation is restricted to admins',
     );
+    // ANANSI PATCH: pin the dedicated subCode so this denial stays
+    // distinguishable from the unrelated FORBIDDEN_EXCEPTION thrown by the
+    // workspace-count-limit check.
+    await expect(rejection).rejects.toMatchObject({
+      code: AuthExceptionCode.ANANSI_NOT_ALLOWLISTED,
+    });
 
     // Already has a workspace: the gate must short-circuit before ever
     // calling out to Core with the user's email.
@@ -127,9 +136,15 @@ describe('SignInUpService - allowlist-gated workspace creation', () => {
     const isApproved = jest.fn().mockResolvedValue(false);
     const { service } = buildService({ userWorkspaceCount: 0, isApproved });
 
-    await expect(callGate(service, existingNonAdminUser())).rejects.toThrow(
+    const rejection = callGate(service, existingNonAdminUser());
+
+    await expect(rejection).rejects.toThrow(
       'Workspace creation is restricted to admins',
     );
+    // ANANSI PATCH: pin the dedicated subCode (see comment above).
+    await expect(rejection).rejects.toMatchObject({
+      code: AuthExceptionCode.ANANSI_NOT_ALLOWLISTED,
+    });
 
     expect(isApproved).toHaveBeenCalledWith('allowlisted@example.com');
   });
