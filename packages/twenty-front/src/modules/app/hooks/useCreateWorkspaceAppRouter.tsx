@@ -123,6 +123,15 @@ const MobileHomePage = lazy(() =>
   })),
 );
 
+// ANANSI PATCH (WS-B): profile page (autonomy switches, resume, search,
+// availability) -- sits inside the same authenticated workspace router as
+// Home/AiChat below, so it gets the default layout (sidebar visible).
+const AnansiProfilePage = lazy(() =>
+  import('~/pages/anansi/AnansiProfilePage').then((module) => ({
+    default: module.AnansiProfilePage,
+  })),
+);
+
 const NotFound = lazy(() =>
   import('~/pages/not-found/NotFound').then((module) => ({
     default: module.NotFound,
@@ -195,6 +204,15 @@ const createWorkspaceAppRouter = (
                 element={
                   <LazyRoute>
                     <MobileHomePage />
+                  </LazyRoute>
+                }
+              />
+              {/* ANANSI PATCH (WS-B): profile page route */}
+              <Route
+                path={AppPath.AnansiProfile}
+                element={
+                  <LazyRoute>
+                    <AnansiProfilePage />
                   </LazyRoute>
                 }
               />

@@ -21,6 +21,9 @@ export enum AppPath {
   Index = '/',
   // Mobile only: the navigation menu is a page there rather than a drawer.
   Home = '/home',
+  // ANANSI PATCH (WS-B): in-app profile page (autonomy switches, resume,
+  // search, availability). Task 9 already links the nav here.
+  AnansiProfile = '/profile',
   TasksPage = '/objects/tasks',
   OpportunitiesPage = '/objects/opportunities',
 
