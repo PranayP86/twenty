@@ -1,3 +1,4 @@
+export * from './canRecordFiltersMatchAnyRecord';
 export * from './checkIfShouldComputeEmptinessFilter';
 export * from './filterOutInvalidRecordFilters';
 export * from './compute-record-gql-operation-filter/for-composite-field/computeGqlOperationFilterForEmails';

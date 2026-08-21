@@ -2,11 +2,11 @@ import { Injectable } from '@nestjs/common';
 
 import { type RecordGqlOperationFilter } from 'twenty-shared/types';
 import {
+  canRecordFiltersMatchAnyRecord,
   computeRecordGqlOperationFilter,
   isDefined,
   isEmptyObject,
   isNonEmptyArray,
-  isRecordFilterValueValid,
   resolveInput,
 } from 'twenty-shared/utils';
 
@@ -69,18 +69,9 @@ export class FindRecordsWorkflowAction implements WorkflowAction {
         workspaceId,
       );
 
-    if (workflowActionInput.filter?.recordFilters) {
-      for (const filter of workflowActionInput.filter.recordFilters) {
-        if (!isRecordFilterValueValid(filter)) {
-          throw new WorkflowStepExecutorException(
-            `Filter condition has an empty value after variable resolution. This likely means a workflow variable could not be resolved. Filter field: ${filter.fieldMetadataId}, operand: ${filter.operand}`,
-            WorkflowStepExecutorExceptionCode.INVALID_STEP_INPUT,
-          );
-        }
-      }
-    }
-
     const recordFilters = workflowActionInput.filter?.recordFilters;
+    const recordFilterGroups =
+      workflowActionInput.filter?.recordFilterGroups ?? [];
 
     let gqlOperationFilter: RecordGqlOperationFilter;
 
@@ -91,8 +82,7 @@ export class FindRecordsWorkflowAction implements WorkflowAction {
               flatFieldMetadataMaps.byUniversalIdentifier,
             ).filter(isDefined),
             recordFilters,
-            recordFilterGroups:
-              workflowActionInput.filter?.recordFilterGroups ?? [],
+            recordFilterGroups,
             filterValueDependencies: {
               timeZone: 'UTC',
             },
@@ -103,6 +93,19 @@ export class FindRecordsWorkflowAction implements WorkflowAction {
         `Filter could not be computed: ${error.message}`,
         WorkflowStepExecutorExceptionCode.INVALID_STEP_INPUT,
       );
+    }
+
+    if (
+      isDefined(recordFilters) &&
+      !canRecordFiltersMatchAnyRecord({ recordFilters, recordFilterGroups })
+    ) {
+      return {
+        result: {
+          first: undefined,
+          all: [],
+          totalCount: 0,
+        },
+      };
     }
 
     if (isNonEmptyArray(recordFilters) && isEmptyObject(gqlOperationFilter)) {
