@@ -159,15 +159,17 @@ export const SignInUp = () => {
               logged-in user at step Init actually leaves this page instead
               of being stuck on the loader forever. Mirrors the GlobalScope
               and fallback branches below, which both use this same effect.
-              The WorkspaceScope branch (isDefined(workspacePublicData) &&
-              isOnAWorkspace) is deliberately excluded: its effect has no
-              isLogged-navigation logic, and that branch only renders inside
-              WorkspaceAppProviders, where the sibling PageChangeEffect
-              already navigates a logged-in user off this route. */}
+              Workspace subdomains are excluded via the SYNCHRONOUS
+              hostname check isOnAWorkspace (never the async
+              workspacePublicData atom, which is briefly null on every load
+              and would let this effect fire inside WorkspaceApp and start a
+              redirectToWorkspaceDomain reload loop). On a workspace
+              subdomain PageChangeEffect already navigates a logged-in user
+              off this route. */}
           {clientConfigApiStatus.isLoadedOnce &&
             isLogged &&
             signInUpStep === SignInUpStep.Init &&
-            !(isDefined(workspacePublicData) && isOnAWorkspace) && (
+            !isOnAWorkspace && (
               <SignInUpGlobalScopeFormEffect />
             )}
           <Loader color="gray" />
