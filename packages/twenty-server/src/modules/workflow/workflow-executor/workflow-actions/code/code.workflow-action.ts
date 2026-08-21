@@ -6,6 +6,7 @@ import { type WorkflowAction } from 'src/modules/workflow/workflow-executor/inte
 
 import { type LogicFunctionExecuteResult } from 'src/engine/core-modules/logic-function/logic-function-drivers/interfaces/logic-function-driver.interface';
 import { LogicFunctionExecutorService } from 'src/engine/core-modules/logic-function/logic-function-executor/logic-function-executor.service';
+import { isRetryableLogicFunctionExecutionError } from 'src/engine/core-modules/logic-function/logic-function-trigger/utils/is-retryable-logic-function-execution-error.util';
 import {
   WorkflowStepExecutorException,
   WorkflowStepExecutorExceptionCode,
@@ -66,7 +67,10 @@ export class CodeWorkflowAction implements WorkflowAction {
     });
 
     if (result.error) {
-      return { error: result.error.errorMessage };
+      return {
+        error: result.error.errorMessage,
+        shouldRetryStep: isRetryableLogicFunctionExecutionError(result.error),
+      };
     }
 
     return { result: result.data || {} };

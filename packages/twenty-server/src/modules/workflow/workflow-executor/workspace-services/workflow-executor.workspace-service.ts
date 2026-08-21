@@ -26,6 +26,7 @@ import { WorkspaceCacheService } from 'src/engine/workspace-cache/services/works
 import { WorkspaceEventEmitter } from 'src/engine/workspace-event-emitter/workspace-event-emitter';
 import { WorkflowRunStatus } from 'src/modules/workflow/common/standard-objects/workflow-run.workspace-entity';
 import { workflowHasRunningSteps } from 'src/modules/workflow/common/utils/workflow-has-running-steps.util';
+import { WORKFLOW_STEP_MAX_ATTEMPTS } from 'src/modules/workflow/workflow-executor/constants/workflow-step-retry.constant';
 import {
   WorkflowStepExecutorException,
   WorkflowStepExecutorExceptionCode,
@@ -36,6 +37,7 @@ import {
   type WorkflowBranchExecutorInput,
   type WorkflowExecutorInput,
 } from 'src/modules/workflow/workflow-executor/types/workflow-executor-input';
+import { executeWithTransientRetry } from 'src/modules/workflow/workflow-executor/utils/execute-with-transient-retry.util';
 import { shouldExecuteStep } from 'src/modules/workflow/workflow-executor/utils/should-execute-step.util';
 import { shouldFailSafely } from 'src/modules/workflow/workflow-executor/utils/should-fail-safely.util';
 import { shouldSkipStepExecution } from 'src/modules/workflow/workflow-executor/utils/should-skip-step-execution.util';
@@ -447,6 +449,10 @@ export class WorkflowExecutorWorkspaceService {
 
     const workflowAction = this.workflowActionFactory.get(step.type);
 
+    const maxAttempts = isWorkflowIteratorAction(step)
+      ? 1
+      : WORKFLOW_STEP_MAX_ATTEMPTS;
+
     await this.workflowRunWorkspaceService.updateWorkflowRunStepInfo({
       stepId,
       stepInfo: {
@@ -458,14 +464,18 @@ export class WorkflowExecutorWorkspaceService {
     });
 
     try {
-      return await workflowAction.execute({
-        currentStepId: stepId,
-        steps,
-        context: getWorkflowRunContext(stepInfos),
-        runInfo: {
-          workflowRunId,
-          workspaceId,
-        },
+      return await executeWithTransientRetry({
+        maxAttempts,
+        execute: () =>
+          workflowAction.execute({
+            currentStepId: stepId,
+            steps,
+            context: getWorkflowRunContext(stepInfos),
+            runInfo: {
+              workflowRunId,
+              workspaceId,
+            },
+          }),
       });
     } catch (error) {
       const isUserError =

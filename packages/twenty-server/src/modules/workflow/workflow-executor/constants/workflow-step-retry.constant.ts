@@ -1,0 +1,1 @@
+export const WORKFLOW_STEP_MAX_ATTEMPTS = 3;
