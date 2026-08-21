@@ -1,4 +1,5 @@
 import { isAppEffectRedirectEnabledState } from '@/app/states/isAppEffectRedirectEnabledState';
+import { isRedeemingSSOExchangeTokenState } from '@/auth/states/isRedeemingSSOExchangeTokenState';
 import { tokenPairState } from '@/auth/states/tokenPairState';
 import { useSnackBar } from '@/ui/feedback/snack-bar-manager/hooks/useSnackBar';
 import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
@@ -14,6 +15,10 @@ export const useRedeemSSOExchangeToken = () => {
   const setIsAppEffectRedirectEnabled = useSetAtomState(
     isAppEffectRedirectEnabledState,
   );
+  // ANANSI PATCH: no sign-in flash during OAuth resume
+  const setIsRedeemingSSOExchangeToken = useSetAtomState(
+    isRedeemingSSOExchangeTokenState,
+  );
   const [getAuthTokensFromSSOExchangeToken] = useMutation(
     GetAuthTokensFromSsoExchangeTokenDocument,
   );
@@ -23,6 +28,7 @@ export const useRedeemSSOExchangeToken = () => {
       // Keeps PageChangeEffect from consuming returnToPath mid token swap, and
       // drops any stale pair so the resume waits for the one being redeemed
       setIsAppEffectRedirectEnabled(false);
+      setIsRedeemingSSOExchangeToken(true);
       setTokenPair(null);
 
       try {
@@ -43,12 +49,14 @@ export const useRedeemSSOExchangeToken = () => {
         );
       } finally {
         setIsAppEffectRedirectEnabled(true);
+        setIsRedeemingSSOExchangeToken(false);
       }
     },
     [
       getAuthTokensFromSSOExchangeToken,
       setTokenPair,
       setIsAppEffectRedirectEnabled,
+      setIsRedeemingSSOExchangeToken,
       enqueueErrorSnackBar,
     ],
   );

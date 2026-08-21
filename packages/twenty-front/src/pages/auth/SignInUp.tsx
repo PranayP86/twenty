@@ -2,6 +2,7 @@ import { useIsLogged } from '@/auth/hooks/useIsLogged';
 import { useSignInUp } from '@/auth/sign-in-up/hooks/useSignInUp';
 import { useSignInUpForm } from '@/auth/sign-in-up/hooks/useSignInUpForm';
 import { isCreatingWorkspaceState } from '@/auth/states/isCreatingWorkspaceState';
+import { isRedeemingSSOExchangeTokenState } from '@/auth/states/isRedeemingSSOExchangeTokenState';
 import {
   SignInUpStep,
   signInUpStepState,
@@ -67,6 +68,10 @@ export const SignInUp = () => {
   const { form } = useSignInUpForm();
   const { signInUpStep } = useSignInUp(form);
   const isLogged = useIsLogged();
+  // ANANSI PATCH: no sign-in flash during OAuth resume
+  const isRedeemingSSOExchangeToken = useAtomStateValue(
+    isRedeemingSSOExchangeTokenState,
+  );
   const { isDefaultDomain } = useIsCurrentLocationOnDefaultDomain();
   const { isOnAWorkspace } = useIsCurrentLocationOnAWorkspace();
   const workspacePublicData = useAtomStateValue(workspacePublicDataState);
@@ -143,6 +148,7 @@ export const SignInUp = () => {
       getPublicWorkspaceDataLoading ||
       !clientConfigApiStatus.isLoadedOnce ||
       // ANANSI PATCH: no sign-in flash during OAuth resume
+      isRedeemingSSOExchangeToken ||
       (isLogged && signInUpStep === SignInUpStep.Init)
     ) {
       return (
@@ -206,6 +212,7 @@ export const SignInUp = () => {
     isLogged,
     isMultiWorkspaceEnabled,
     isOnAWorkspace,
+    isRedeemingSSOExchangeToken,
     getPublicWorkspaceDataLoading,
     signInUpStep,
     workspacePublicData,
