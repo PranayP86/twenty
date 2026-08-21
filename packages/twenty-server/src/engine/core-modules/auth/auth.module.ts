@@ -27,6 +27,8 @@ import { GoogleAPIsService } from 'src/engine/core-modules/auth/services/google-
 import { MicrosoftAPIsService } from 'src/engine/core-modules/auth/services/microsoft-apis.service';
 import { ResetPasswordService } from 'src/engine/core-modules/auth/services/reset-password.service';
 import { SignInUpService } from 'src/engine/core-modules/auth/services/sign-in-up.service';
+// ANANSI PATCH: allowlist-gated workspace creation
+import { AnansiAllowlistService } from 'src/engine/core-modules/auth/services/anansi-allowlist.service';
 import { UpdateConnectedAccountOnReconnectService } from 'src/engine/core-modules/auth/services/update-connected-account-on-reconnect.service';
 import { SamlAuthStrategy } from 'src/engine/core-modules/auth/strategies/saml.auth.strategy';
 import { AccessTokenService } from 'src/engine/core-modules/auth/token/services/access-token.service';
@@ -148,6 +150,8 @@ import { JwtAuthStrategy } from './strategies/jwt.auth.strategy';
   ],
   providers: [
     SignInUpService,
+    // ANANSI PATCH: allowlist-gated workspace creation
+    AnansiAllowlistService,
     AuthService,
     JwtAuthStrategy,
     SamlAuthStrategy,

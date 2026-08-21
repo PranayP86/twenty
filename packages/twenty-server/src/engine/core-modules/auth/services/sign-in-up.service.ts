@@ -36,6 +36,8 @@ import {
   compareHash,
   hashPassword,
 } from 'src/engine/core-modules/auth/auth.util';
+// ANANSI PATCH: allowlist-gated workspace creation
+import { AnansiAllowlistService } from 'src/engine/core-modules/auth/services/anansi-allowlist.service';
 import { MAX_WORKSPACES_WITHOUT_ENTERPRISE_KEY } from 'src/engine/core-modules/auth/constants/max-workspaces-without-enterprise-key.constants';
 import { DEFAULT_DPA_REGION } from 'src/engine/core-modules/dpa/config/dpa-region-config.constant';
 import { DpaAgreementEntity } from 'src/engine/core-modules/dpa/entities/dpa-agreement.entity';
@@ -98,6 +100,8 @@ export class SignInUpService {
     private readonly billingService: BillingService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    // ANANSI PATCH: allowlist-gated workspace creation
+    private readonly anansiAllowlistService: AnansiAllowlistService,
   ) {}
 
   async computePartialUserFromUserPayload(
@@ -516,6 +520,29 @@ export class SignInUpService {
       userData.existingUser.canAccessFullAdminPanel;
 
     if (isExistingAdmin) {
+      return;
+    }
+
+    // ANANSI PATCH: allowlisted users may create their single workspace.
+    // One user = one workspace: an existing user who already belongs to a
+    // workspace stays denied even if the allowlist approves their email.
+    const email =
+      userData.type === 'existingUser'
+        ? userData.existingUser.email
+        : userData.newUserWithPicture.email;
+
+    const currentWorkspaceCount =
+      userData.type === 'existingUser'
+        ? await this.userWorkspaceService.countUserWorkspaces(
+            userData.existingUser.id,
+          )
+        : 0;
+
+    if (
+      currentWorkspaceCount === 0 &&
+      isDefined(email) &&
+      (await this.anansiAllowlistService.isApproved(email))
+    ) {
       return;
     }
 
