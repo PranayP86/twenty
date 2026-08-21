@@ -3,6 +3,9 @@ import { OnboardingAnimatedReveal } from '@/onboarding/components/OnboardingAnim
 import { OnboardingStepAnimatedItem } from '@/onboarding/components/OnboardingStepAnimatedItem';
 import { ONBOARDING_CONTENT_BLOCK_WIDTH } from '@/onboarding/constants/OnboardingContentBlockWidth';
 import { useWorkspaceSubdomainField } from '@/auth/sign-in-up/hooks/useWorkspaceSubdomainField';
+// ANANSI PATCH: admin-bypass gate + zero-form auto-provisioning
+import { AnansiProvisioningScreen } from '@/auth/sign-in-up/components/internal/AnansiProvisioningScreen';
+import { currentUserState } from '@/auth/states/currentUserState';
 import { isCreatingWorkspaceState } from '@/auth/states/isCreatingWorkspaceState';
 import { isMultiWorkspaceEnabledState } from '@/client-config/states/isMultiWorkspaceEnabledState';
 import { domainConfigurationState } from '@/domain-manager/states/domainConfigurationState';
@@ -13,6 +16,8 @@ import { styled } from '@linaria/react';
 import { useLingui } from '@lingui/react/macro';
 import { isNonEmptyString } from '@sniptt/guards';
 import { useEffect, useRef, useState } from 'react';
+// ANANSI PATCH: admin-bypass query param
+import { useSearchParams } from 'react-router-dom';
 import { Key } from 'ts-key-enum';
 import { isDefined } from 'twenty-shared/utils';
 import { Avatar } from 'twenty-ui/data-display';
@@ -135,7 +140,28 @@ const StyledAvailabilityDot = styled.div`
   width: 6px;
 `;
 
+// ANANSI PATCH: replaced body — this is now the gate. Non-admin users (the
+// overwhelming majority) never see this form at all; they get the zero-form
+// AnansiProvisioningScreen instead. The stock form below stays reachable
+// only for server admins who explicitly asked to create another workspace
+// (?action=create-new-workspace) — the same entry point
+// navigateAfterMultiWorkspaceSignInUp already uses for that purpose.
 export const SignInUpWorkspaceCreationForm = () => {
+  const currentUser = useAtomStateValue(currentUserState);
+  const [searchParams] = useSearchParams();
+
+  const isAdminBypass =
+    currentUser?.canAccessFullAdminPanel === true &&
+    searchParams.get('action') === 'create-new-workspace';
+
+  if (!isAdminBypass) {
+    return <AnansiProvisioningScreen />;
+  }
+
+  return <StockSignInUpWorkspaceCreationForm />;
+};
+
+const StockSignInUpWorkspaceCreationForm = () => {
   const { t } = useLingui();
   const { createWorkspace } = useSignUpInNewWorkspace();
   const { frontDomain } = useAtomStateValue(domainConfigurationState);
