@@ -153,6 +153,8 @@ export const SignInUp = () => {
     ) {
       return (
         <StyledLoaderContainer>
+          {clientConfigApiStatus.isLoadedOnce &&
+            isRedeemingSSOExchangeToken && <SignInUpSSOExchangeTokenEffect />}
           <Loader color="gray" />
         </StyledLoaderContainer>
       );

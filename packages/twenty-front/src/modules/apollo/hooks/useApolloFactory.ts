@@ -3,6 +3,7 @@ import { useMemo, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import { ApolloFactory, type Options } from '@/apollo/services/apollo.factory';
+import { ANANSI_HOME_URL } from '@/auth/constants/AnansiHomeUrl';
 import { ONGOING_USER_CREATION_PATHS } from '@/auth/constants/OngoingUserCreationPaths';
 import { currentUserState } from '@/auth/states/currentUserState';
 import { isCookieAuthActiveState } from '@/auth/states/isCookieAuthActiveState';
@@ -88,7 +89,7 @@ export const useApolloFactory = (options: Partial<Options> = {}) => {
             setReturnToPath(path);
           }
           // ANANSI PATCH: logout lands on the Anansi front door
-          window.location.assign('https://anansi.work');
+          window.location.assign(ANANSI_HOME_URL);
         }
       },
       onAppVersionMismatch: (message) => {

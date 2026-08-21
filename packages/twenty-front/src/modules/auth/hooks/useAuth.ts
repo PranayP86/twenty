@@ -23,6 +23,7 @@ import {
   VerifyEmailAndGetWorkspaceAgnosticTokenDocument,
 } from '~/generated-metadata/graphql';
 
+import { ANANSI_HOME_URL } from '@/auth/constants/AnansiHomeUrl';
 import { currentUserState } from '@/auth/states/currentUserState';
 import { isCookieAuthActiveState } from '@/auth/states/isCookieAuthActiveState';
 import { isPendingServerSignOutState } from '@/auth/states/isPendingServerSignOutState';
@@ -131,7 +132,7 @@ export const useAuth = () => {
     clearSessionLocalStorageKeys();
     setLastAuthenticateWorkspaceDomain(null);
     // ANANSI PATCH: logout lands on the Anansi front door
-    window.location.assign('https://anansi.work');
+    window.location.assign(ANANSI_HOME_URL);
   }, [store, setLastAuthenticateWorkspaceDomain]);
 
   const handleSetAuthTokens = useCallback(
