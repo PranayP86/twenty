@@ -1,3 +1,4 @@
+import { useIsLogged } from '@/auth/hooks/useIsLogged';
 import { useSignInUp } from '@/auth/sign-in-up/hooks/useSignInUp';
 import { useSignInUpForm } from '@/auth/sign-in-up/hooks/useSignInUpForm';
 import { isCreatingWorkspaceState } from '@/auth/states/isCreatingWorkspaceState';
@@ -65,6 +66,7 @@ export const SignInUp = () => {
 
   const { form } = useSignInUpForm();
   const { signInUpStep } = useSignInUp(form);
+  const isLogged = useIsLogged();
   const { isDefaultDomain } = useIsCurrentLocationOnDefaultDomain();
   const { isOnAWorkspace } = useIsCurrentLocationOnAWorkspace();
   const workspacePublicData = useAtomStateValue(workspacePublicDataState);
@@ -137,7 +139,12 @@ export const SignInUp = () => {
   ]);
 
   const signInUpForm = useMemo(() => {
-    if (getPublicWorkspaceDataLoading || !clientConfigApiStatus.isLoadedOnce) {
+    if (
+      getPublicWorkspaceDataLoading ||
+      !clientConfigApiStatus.isLoadedOnce ||
+      // ANANSI PATCH: no sign-in flash during OAuth resume
+      (isLogged && signInUpStep === SignInUpStep.Init)
+    ) {
       return (
         <StyledLoaderContainer>
           <Loader color="gray" />
@@ -196,6 +203,7 @@ export const SignInUp = () => {
   }, [
     clientConfigApiStatus.isLoadedOnce,
     isDefaultDomain,
+    isLogged,
     isMultiWorkspaceEnabled,
     isOnAWorkspace,
     getPublicWorkspaceDataLoading,
