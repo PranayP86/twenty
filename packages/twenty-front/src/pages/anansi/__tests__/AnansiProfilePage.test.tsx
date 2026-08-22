@@ -306,11 +306,14 @@ describe('AnansiProfilePage', () => {
     expect(screen.getByLabelText('Timezone')).toHaveValue('America/New_York');
 
     expect(screen.getByLabelText('Rate floor')).toBeDisabled();
+    // ANANSI PATCH (WS-B, task 14 fix): Resume and Search are two separate
+    // sections, each independently rendering this hint while disabled --
+    // getByText's single-match assumption was wrong, not the component.
     expect(
-      screen.getByText(
+      screen.getAllByText(
         "Couldn't load your policy settings -- use Retry above to try again.",
       ),
-    ).toBeInTheDocument();
+    ).toHaveLength(2);
 
     fetchMock.mockClear();
     fireEvent.click(screen.getByRole('switch', { name: 'Remote only' }));
@@ -335,8 +338,13 @@ describe('AnansiProfilePage', () => {
       ).toBeInTheDocument();
     });
 
+    // ANANSI PATCH (WS-B, task 14 fix): twenty-ui's Button always renders a
+    // decorative "..." text node alongside the title (see
+    // twenty-ui/input/Button/internal/ButtonText.tsx -- visually clipped via
+    // CSS, but jsdom has no layout so it stays part of the accessible name),
+    // so the button's accessible name is "Retry ...", not "Retry".
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
     });
 
     await waitFor(() => {
