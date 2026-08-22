@@ -28,7 +28,7 @@ import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomStat
 import { OnboardingStatus } from '~/generated-metadata/graphql';
 import {
   getAnansiMe,
-  patchAnansiMe,
+  patchAnansiTourSeen,
 } from '~/pages/anansi/anansiProfileApi';
 
 const ANCHOR_TIMEOUT_MS = 4000;
@@ -129,25 +129,47 @@ export const AnansiTourOverlay = () => {
   const [isVisible, setIsVisible] = useState(false);
 
   const eligibilityCheckedForTokenRef = useRef<string | undefined>(undefined);
-  const navigatedRoutesRef = useRef(new Set<string>());
-  const isMountedRef = useRef(true);
+  const autoStartEligibleTokenRef = useRef<string | undefined>(undefined);
+  const currentTourRouteRef = useRef<string | undefined>(undefined);
+  const activeTourTokenRef = useRef<string | undefined>(undefined);
+  const sessionAccessTokenRef = useRef(accessToken);
 
-  const startTour = useCallback(() => {
-    // ANANSI PATCH (WS-C): each configured route is navigated at most once per
-    // run. Twenty redirects `/` to the configured home route, and steps 1-2
-    // intentionally share it; retrying on every pathname change would loop.
-    navigatedRoutesRef.current.clear();
+  const startTour = useCallback((tourToken: string) => {
+    // ANANSI PATCH (WS-C): remember only the current route group. Steps 1-2
+    // share the redirected home route, but Back from Profile must navigate home
+    // again instead of treating a route visited earlier as permanently done.
+    currentTourRouteRef.current = undefined;
+    activeTourTokenRef.current = tourToken;
     setStepIndex(0);
     setIsActive(true);
   }, []);
 
+  // ANANSI PATCH (WS-C): an active tour belongs to the access token that
+  // started it. Close immediately on logout, onboarding-state change, or token
+  // replacement so stale async work cannot affect the next signed-in user.
   useEffect(() => {
-    isMountedRef.current = true;
+    const didTokenChange = sessionAccessTokenRef.current !== accessToken;
+    sessionAccessTokenRef.current = accessToken;
+    const canRunTour =
+      isLogged &&
+      onboardingStatus === OnboardingStatus.COMPLETED &&
+      isDefined(accessToken);
 
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+    if (!didTokenChange && canRunTour) {
+      return;
+    }
+
+    eligibilityCheckedForTokenRef.current = undefined;
+    autoStartEligibleTokenRef.current = undefined;
+    currentTourRouteRef.current = undefined;
+    activeTourTokenRef.current = undefined;
+    setIsAutoStartEligible(false);
+    setIsActive(false);
+    setAnchorElement(null);
+    setAnchorRect(null);
+    setIsVisible(false);
+    setIsTourRequested(false);
+  }, [accessToken, isLogged, onboardingStatus, setIsTourRequested]);
 
   // ANANSI PATCH (WS-C): Core is the per-user source of truth. The token ref
   // makes this one GET per authenticated session even as workspace routes move.
@@ -162,33 +184,54 @@ export const AnansiTourOverlay = () => {
     }
 
     eligibilityCheckedForTokenRef.current = accessToken;
+    let isCancelled = false;
 
     void getAnansiMe(accessToken)
       .then((me) => {
         if (
-          isMountedRef.current &&
+          !isCancelled &&
+          sessionAccessTokenRef.current === accessToken &&
           me.onboarding_completed_at !== null &&
           me.tour_seen_at === null
         ) {
+          autoStartEligibleTokenRef.current = accessToken;
           setIsAutoStartEligible(true);
         }
       })
       .catch((error: unknown) => {
+        if (isCancelled) {
+          return;
+        }
         // oxlint-disable-next-line no-console
         console.error('ANANSI: could not load guided-tour state', error);
       });
+
+    return () => {
+      isCancelled = true;
+    };
   }, [accessToken, isLogged, onboardingStatus]);
 
   // ANANSI PATCH (WS-C): Twenty's completion welcome animation owns the same
   // portal layer; wait until it has left before consuming the one-shot start.
   useEffect(() => {
-    if (!isAutoStartEligible || isWelcomeAnimationVisible) {
+    if (
+      !isAutoStartEligible ||
+      isWelcomeAnimationVisible ||
+      !isDefined(accessToken) ||
+      autoStartEligibleTokenRef.current !== accessToken
+    ) {
       return;
     }
 
+    autoStartEligibleTokenRef.current = undefined;
     setIsAutoStartEligible(false);
-    startTour();
-  }, [isAutoStartEligible, isWelcomeAnimationVisible, startTour]);
+    startTour(accessToken);
+  }, [
+    accessToken,
+    isAutoStartEligible,
+    isWelcomeAnimationVisible,
+    startTour,
+  ]);
 
   // ANANSI PATCH (WS-C): a successful Profile reset starts immediately rather
   // than waiting for another eligibility GET or application remount.
@@ -203,7 +246,7 @@ export const AnansiTourOverlay = () => {
     }
 
     setIsTourRequested(false);
-    startTour();
+    startTour(accessToken);
   }, [
     accessToken,
     isLogged,
@@ -214,23 +257,24 @@ export const AnansiTourOverlay = () => {
   ]);
 
   const closeAndMarkSeen = useCallback(() => {
+    const tourToken = activeTourTokenRef.current;
+    activeTourTokenRef.current = undefined;
     setIsActive(false);
     setAnchorElement(null);
     setAnchorRect(null);
 
-    if (!isDefined(accessToken)) {
+    if (!isDefined(tourToken)) {
       return;
     }
 
-    // ANANSI PATCH (WS-C): persistence must never hold the overlay open. A
-    // transient Core error is logged, while the current UI closes immediately.
-    void patchAnansiMe(accessToken, { tour_seen: true }).catch(
-      (error: unknown) => {
-        // oxlint-disable-next-line no-console
-        console.error('ANANSI: could not mark guided tour seen', error);
-      },
-    );
-  }, [accessToken]);
+    // ANANSI PATCH (WS-C): persistence must never hold the overlay open. The
+    // shared writer preserves close-before-restart ordering, and the captured
+    // tour token prevents an account switch from writing the next user's state.
+    void patchAnansiTourSeen(tourToken, true).catch((error: unknown) => {
+      // oxlint-disable-next-line no-console
+      console.error('ANANSI: could not mark guided tour seen', error);
+    });
+  }, []);
 
   // ANANSI PATCH (WS-C): navigate first, then poll the live document for up to
   // four seconds. Late dashboard metadata is tolerated; absent stops disappear
@@ -252,9 +296,9 @@ export const AnansiTourOverlay = () => {
 
     if (
       isDefined(step.route) &&
-      !navigatedRoutesRef.current.has(step.route)
+      currentTourRouteRef.current !== step.route
     ) {
-      navigatedRoutesRef.current.add(step.route);
+      currentTourRouteRef.current = step.route;
       if (location.pathname !== step.route) {
         navigate(step.route);
       }

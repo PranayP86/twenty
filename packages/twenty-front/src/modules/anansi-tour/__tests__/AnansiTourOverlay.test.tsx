@@ -10,7 +10,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { Provider as JotaiProvider } from 'jotai';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SOURCE_LOCALE } from 'twenty-shared/translations';
 import { ThemeProvider } from 'twenty-ui/theme-constants';
 
@@ -23,6 +23,7 @@ import {
   resetJotaiStore,
 } from '@/ui/utilities/state/jotai/jotaiStore';
 import { OnboardingStatus } from '~/generated-metadata/graphql';
+import { patchAnansiTourSeen } from '~/pages/anansi/anansiProfileApi';
 import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
 
 const mockUseOnboardingStatus = jest.fn();
@@ -55,10 +56,10 @@ const flushAnimationFrames = async (count: number) => {
 const waitForAnimationFrame = () =>
   waitFor(() => expect(animationFrameCallbacks.size).toBeGreaterThan(0));
 
-const setTokenPair = () => {
+const setTokenPair = (accessToken = ACCESS_TOKEN) => {
   jotaiStore.set(tokenPairState.atom, {
     accessOrWorkspaceAgnosticToken: {
-      token: ACCESS_TOKEN,
+      token: accessToken,
       expiresAt: '2099-01-01T00:00:00.000Z',
     },
     refreshToken: {
@@ -123,10 +124,16 @@ const appendAllAnchors = () => {
   appendAnchor({ id: 'nav-item-jobs-test' });
 };
 
+const LocationProbe = () => {
+  const location = useLocation();
+  return <span data-testid="location-pathname">{location.pathname}</span>;
+};
+
 const renderOverlay = () =>
   render(
     <JotaiProvider store={jotaiStore}>
       <MemoryRouter initialEntries={['/']}>
+        <LocationProbe />
         <ThemeProvider colorScheme="light">
           <I18nProvider i18n={i18n}>
             <AnansiTourOverlay />
@@ -206,6 +213,60 @@ describe('AnansiTourOverlay', () => {
     expect(screen.getByText('1 of 4')).toBeInTheDocument();
   });
 
+  it('ignores an eligibility response from the previous signed-in user', async () => {
+    let resolveFirstResponse: (response: MockResponse) => void = () => undefined;
+    const firstResponse = new Promise<MockResponse>((resolve) => {
+      resolveFirstResponse = resolve;
+    });
+    const fetchMock = jest
+      .fn()
+      .mockImplementationOnce(() => firstResponse)
+      .mockResolvedValueOnce(jsonOk(meResponse(COMPLETED_AT)));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      setTokenPair('next-user-access-token');
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveFirstResponse(jsonOk(meResponse(null)));
+      await Promise.resolve();
+    });
+
+    expect(animationFrameCallbacks.size).toBe(0);
+    expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
+  });
+
+  it('closes an active tour without writing when the signed-in user changes', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [
+        jsonOk(meResponse(null)),
+        jsonOk(meResponse(COMPLETED_AT)),
+      ],
+    });
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+    expect(await showStop('Your dashboard')).toBeInTheDocument();
+
+    act(() => {
+      setTokenPair('next-user-access-token');
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+      ),
+    ).toBe(false);
+  });
+
   it('defers auto-start until the completion welcome animation leaves', async () => {
     const fetchMock = mockFetchRouter({
       'GET /v1/me': [jsonOk(meResponse(null))],
@@ -238,6 +299,28 @@ describe('AnansiTourOverlay', () => {
     await flushAnimationFrames(30);
     expect(await screen.findByText('Jobs')).toBeInTheDocument();
     expect(screen.getByText('4 of 4')).toBeInTheDocument();
+  });
+
+  it('navigates home again when Back crosses from Profile to a home stop', async () => {
+    mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+    });
+    appendAllAnchors();
+
+    renderOverlay();
+    await showStop('Your dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await showStop('Live cards');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await showStop('Autonomy switches');
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/profile');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location-pathname')).toHaveTextContent('/'),
+    );
+    expect(await showStop('Live cards')).toBeInTheDocument();
   });
 
   it('Finish closes immediately and marks the tour seen', async () => {
@@ -283,6 +366,33 @@ describe('AnansiTourOverlay', () => {
           body: JSON.stringify({ tour_seen: true }),
         }),
       ),
+    );
+  });
+
+  it('serializes close and restart writes across an access-token refresh', async () => {
+    let resolveFirstResponse: (response: MockResponse) => void = () => undefined;
+    const firstResponse = new Promise<MockResponse>((resolve) => {
+      resolveFirstResponse = resolve;
+    });
+    const fetchMock = jest
+      .fn()
+      .mockImplementationOnce(() => firstResponse)
+      .mockResolvedValueOnce(jsonOk(meResponse(null)));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const markSeen = patchAnansiTourSeen('old-access-token', true);
+    const restart = patchAnansiTourSeen('refreshed-access-token', false);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    resolveFirstResponse(jsonOk(meResponse(COMPLETED_AT)));
+    await Promise.all([markSeen, restart]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(
+      JSON.stringify({ tour_seen: true }),
+    );
+    expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(
+      JSON.stringify({ tour_seen: false }),
     );
   });
 });

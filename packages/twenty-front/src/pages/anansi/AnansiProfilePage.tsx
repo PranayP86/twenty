@@ -34,6 +34,7 @@ import {
   getAnansiMe,
   getAnansiPolicy,
   patchAnansiMe,
+  patchAnansiTourSeen,
   postAnansiAutomation,
   putAnansiPolicy,
 } from '~/pages/anansi/anansiProfileApi';
@@ -202,7 +203,7 @@ export const AnansiProfilePage = () => {
     setIsRestartingTour(true);
 
     try {
-      const response = await patchAnansiMe(accessToken, { tour_seen: false });
+      const response = await patchAnansiTourSeen(accessToken, false);
       setMe(response);
       setIsTourRequested(true);
     } catch (error) {

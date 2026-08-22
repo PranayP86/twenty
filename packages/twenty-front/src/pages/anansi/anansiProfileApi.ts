@@ -165,6 +165,27 @@ export const patchAnansiMe = (
     body: JSON.stringify(payload),
   });
 
+// ANANSI PATCH (WS-C): tour close and Profile restart can happen back-to-back,
+// including across an access-token refresh. Serialize all tour-seen writes so a
+// slow `true` response cannot land after a later `false` restart.
+let anansiTourSeenWriteQueue: Promise<unknown> = Promise.resolve();
+
+export const patchAnansiTourSeen = (
+  accessToken: string,
+  tourSeen: boolean,
+): Promise<AnansiMeResponse> => {
+  const nextWrite = anansiTourSeenWriteQueue.then(() =>
+    patchAnansiMe(accessToken, { tour_seen: tourSeen }),
+  );
+
+  anansiTourSeenWriteQueue = nextWrite.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return nextWrite;
+};
+
 // ANANSI PATCH (WS-C): wizard resume/profile/completion calls. The multipart
 // request intentionally omits Content-Type so fetch supplies its boundary.
 export const getAnansiProfile = (
