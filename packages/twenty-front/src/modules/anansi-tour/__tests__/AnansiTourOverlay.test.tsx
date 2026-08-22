@@ -217,7 +217,7 @@ describe('AnansiTourOverlay', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
-    expect(animationFrameCallbacks).toHaveSize(0);
+    expect(animationFrameCallbacks.size).toBe(0);
 
     act(() => {
       jotaiStore.set(isWelcomeAnimationVisibleState.atom, false);
