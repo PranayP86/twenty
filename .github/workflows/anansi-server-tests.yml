@@ -58,4 +58,4 @@ jobs:
           # ANANSI PATCH (WS-C): exact wizard spec filename keeps the focused
           # front gate from silently skipping Task 9 coverage.
           npx jest --config packages/twenty-front/jest.config.mjs --ci --runInBand \
-            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|AnansiWizard\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"
+            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|AnansiWizard\.test\.tsx|OnboardingStepLayout\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"

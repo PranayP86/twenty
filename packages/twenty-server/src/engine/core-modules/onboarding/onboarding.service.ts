@@ -1135,7 +1135,8 @@ export class OnboardingService {
   }
 
   // ANANSI PATCH (WS-C): serialize wizard completion with every other
-  // onboarding transition, then clear its pending boundary atomically.
+  // onboarding transition. Claim its boundary and clear stock reversible
+  // history atomically so PROFILE_CREATION cannot be resurrected afterward.
   async completeOnboardingAnansiWizardStep({
     userId,
     workspaceId,
@@ -1145,12 +1146,47 @@ export class OnboardingService {
   }) {
     await this.runStepTransitionInLockedTransaction(
       { userId, workspaceId },
-      async (queryRunner) =>
-        this.setOnboardingAnansiWizardPending(
-          { userId, workspaceId, value: false },
+      async (queryRunner) => {
+        const hasClaimedAnansiWizardStep =
+          await this.claimOnboardingAnansiWizardStep(
+            { userId, workspaceId },
+            queryRunner,
+          );
+
+        if (!hasClaimedAnansiWizardStep) {
+          return;
+        }
+
+        await this.clearReversibleOnboardingStepHistoryAfterIrreversibleStep(
+          { userId, workspaceId },
           queryRunner,
-        ),
+        );
+      },
     );
+  }
+
+  // ANANSI PATCH (WS-C): completion is a claim, not an unconditional delete;
+  // repeated or absent-flag calls stay safe no-ops and preserve history.
+  private async claimOnboardingAnansiWizardStep(
+    {
+      userId,
+      workspaceId,
+    }: {
+      userId: string;
+      workspaceId: string;
+    },
+    queryRunner?: QueryRunner,
+  ): Promise<boolean> {
+    const affectedRows = await this.userVarsService.delete(
+      {
+        userId,
+        workspaceId,
+        key: OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING,
+      },
+      queryRunner,
+    );
+
+    return isDefined(affectedRows) && affectedRows > 0;
   }
 
   async completeOnboardingProfileStepIfNameProvided({

@@ -352,7 +352,7 @@ describe('AnansiWizard', () => {
 
     await waitFor(() => {
       expect(mockSetNextOnboardingStatus).toHaveBeenCalledWith({
-        stepHistoryEffect: 'leaveUnchanged',
+        stepHistoryEffect: 'clearAfterIrreversibleStep',
       });
     });
     expect(finishOrder).toEqual([

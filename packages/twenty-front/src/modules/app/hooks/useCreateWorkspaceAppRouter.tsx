@@ -155,7 +155,9 @@ const AnansiWelcomeLayout = () => {
   const onboardingStatus = useOnboardingStatus();
 
   return onboardingStatus === OnboardingStatus.ANANSI_WIZARD ? (
-    <OnboardingStepLayout />
+    // ANANSI PATCH (WS-C): wizard sub-steps own Back locally; stock Back would
+    // restore PROFILE_CREATION and break the irreversible wizard boundary.
+    <OnboardingStepLayout hideBackButton />
   ) : (
     <OnboardingTransitionOutlet />
   );

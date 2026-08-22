@@ -537,7 +537,11 @@ export const AnansiWizard = () => {
         throw new Error('Wizard mutation did not succeed');
       }
 
-      setNextOnboardingStatus({ stepHistoryEffect: 'leaveUnchanged' });
+      // ANANSI PATCH (WS-C): wizard completion is irreversible. Clear the
+      // client history with the same boundary the server commits atomically.
+      setNextOnboardingStatus({
+        stepHistoryEffect: 'clearAfterIrreversibleStep',
+      });
     } catch (error) {
       if (!isMountedRef.current) {
         return;

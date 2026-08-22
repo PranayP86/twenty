@@ -13,8 +13,8 @@ describe('OnboardingService - Anansi wizard', () => {
   const workspaceId = 'workspace-1';
 
   const buildService = (pendingKeys: OnboardingStepKeys[] = []) => {
-    const userVars = new Map<OnboardingStepKeys, boolean>(
-      pendingKeys.map((key): [OnboardingStepKeys, boolean] => [key, true]),
+    const userVars = new Map<OnboardingStepKeys, unknown>(
+      pendingKeys.map((key): [OnboardingStepKeys, unknown] => [key, true]),
     );
     const userVarsService = {
       getAll: jest.fn().mockImplementation(async () => new Map(userVars)),
@@ -128,11 +128,41 @@ describe('OnboardingService - Anansi wizard', () => {
       },
       transactionQueryRunner,
     );
+    expect(userVarsService.set).toHaveBeenCalledWith(
+      {
+        userId,
+        workspaceId,
+        key: OnboardingStepKeys.ONBOARDING_REVERSIBLE_STEP_HISTORY,
+        value: [],
+      },
+      transactionQueryRunner,
+    );
     expect(
       userVars.has(OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING),
     ).toBe(false);
     await expect(
       service.getOnboardingStatus({ userId, workspaceId }),
     ).resolves.toBe(OnboardingStatus.COMPLETED);
+  });
+
+  it('leaves reversible history untouched when the wizard flag is absent', async () => {
+    const { service, userVarsService } = buildService();
+
+    await service.completeOnboardingAnansiWizardStep({ userId, workspaceId });
+
+    expect(userVarsService.delete).toHaveBeenCalledWith(
+      {
+        userId,
+        workspaceId,
+        key: OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING,
+      },
+      expect.anything(),
+    );
+    expect(userVarsService.set).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: OnboardingStepKeys.ONBOARDING_REVERSIBLE_STEP_HISTORY,
+      }),
+      expect.anything(),
+    );
   });
 });

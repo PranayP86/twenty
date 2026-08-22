@@ -9,7 +9,15 @@ import { useOnboardingFreeCreditsTotal } from '@/onboarding/hooks/useOnboardingF
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { isDefined } from 'twenty-shared/utils';
 
-export const OnboardingStepLayout = () => {
+type OnboardingStepLayoutProps = {
+  // ANANSI PATCH (WS-C): the Anansi wizard owns its internal Back control and
+  // must not expose the stock reversible-step Back button.
+  hideBackButton?: boolean;
+};
+
+export const OnboardingStepLayout = ({
+  hideBackButton = false,
+}: OnboardingStepLayoutProps = {}) => {
   const onboardingConfig = useAtomStateValue(onboardingConfigState);
   const freeCreditsTotal = useOnboardingFreeCreditsTotal();
   const currentUser = useAtomStateValue(currentUserState);
@@ -18,9 +26,9 @@ export const OnboardingStepLayout = () => {
     isGoingBackToPreviousOnboardingStep,
   } = useGoBackToPreviousOnboardingStep();
 
-  const hasPreviousOnboardingStep = isDefined(
-    currentUser?.previousOnboardingStatus,
-  );
+  const hasPreviousOnboardingStep =
+    !hideBackButton &&
+    isDefined(currentUser?.previousOnboardingStatus);
 
   return (
     <OnboardingLayout

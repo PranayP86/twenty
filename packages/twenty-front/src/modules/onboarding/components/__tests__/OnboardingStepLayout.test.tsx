@@ -6,6 +6,10 @@ import { Provider as JotaiProvider } from 'jotai';
 import { type ReactNode } from 'react';
 import { SOURCE_LOCALE } from 'twenty-shared/translations';
 
+import {
+  type CurrentUser,
+  currentUserState,
+} from '@/auth/states/currentUserState';
 import { onboardingConfigState } from '@/client-config/states/onboardingConfigState';
 import { type OnboardingConfig } from '@/client-config/types/OnboardingConfig';
 import { OnboardingStepLayout } from '@/onboarding/components/OnboardingStepLayout';
@@ -15,6 +19,7 @@ import {
   jotaiStore,
   resetJotaiStore,
 } from '@/ui/utilities/state/jotai/jotaiStore';
+import { OnboardingStatus } from '~/generated-metadata/graphql';
 import { messages } from '~/locales/generated/en';
 
 jest.mock(
@@ -77,5 +82,22 @@ describe('OnboardingStepLayout', () => {
     render(<OnboardingStepLayout />, { wrapper: Wrapper });
 
     expect(screen.queryByText('free credits')).not.toBeInTheDocument();
+  });
+
+  it('hides the stock Back button for an irreversible step', () => {
+    jotaiStore.set(currentUserState.atom, {
+      previousOnboardingStatus: OnboardingStatus.PROFILE_CREATION,
+    } as CurrentUser);
+
+    const { rerender } = render(<OnboardingStepLayout />, {
+      wrapper: Wrapper,
+    });
+    expect(screen.getByRole('button', { name: 'Go back' })).toBeInTheDocument();
+
+    rerender(<OnboardingStepLayout hideBackButton />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Go back' }),
+    ).not.toBeInTheDocument();
   });
 });
