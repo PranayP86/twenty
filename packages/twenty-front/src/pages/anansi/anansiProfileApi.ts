@@ -167,15 +167,38 @@ export const patchAnansiMe = (
 
 // ANANSI PATCH (WS-C): tour close and Profile restart can happen back-to-back,
 // including across an access-token refresh. Serialize all tour-seen writes so a
-// slow `true` response cannot land after a later `false` restart.
+// slow `true` response cannot land after a later `false` restart. Bound each
+// request so one lost connection cannot block every later write forever.
+const ANANSI_TOUR_SEEN_WRITE_TIMEOUT_MS = 15_000;
 let anansiTourSeenWriteQueue: Promise<unknown> = Promise.resolve();
+
+const patchAnansiTourSeenWithTimeout = async (
+  accessToken: string,
+  tourSeen: boolean,
+): Promise<AnansiMeResponse> => {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(
+    () => controller.abort(),
+    ANANSI_TOUR_SEEN_WRITE_TIMEOUT_MS,
+  );
+
+  try {
+    return await anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken, {
+      method: 'PATCH',
+      body: JSON.stringify({ tour_seen: tourSeen }),
+      signal: controller.signal,
+    });
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+};
 
 export const patchAnansiTourSeen = (
   accessToken: string,
   tourSeen: boolean,
 ): Promise<AnansiMeResponse> => {
   const nextWrite = anansiTourSeenWriteQueue.then(() =>
-    patchAnansiMe(accessToken, { tour_seen: tourSeen }),
+    patchAnansiTourSeenWithTimeout(accessToken, tourSeen),
   );
 
   anansiTourSeenWriteQueue = nextWrite.then(

@@ -395,4 +395,48 @@ describe('AnansiTourOverlay', () => {
       JSON.stringify({ tour_seen: false }),
     );
   });
+
+  it('times out a hung write before running the queued restart', async () => {
+    jest.useFakeTimers();
+    let callCount = 0;
+    const fetchMock = jest.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Promise<MockResponse>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                const error = new Error('Aborted');
+                error.name = 'AbortError';
+                reject(error);
+              },
+              { once: true },
+            );
+          });
+        }
+        return Promise.resolve(jsonOk(meResponse(null)));
+      },
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const markSeen = patchAnansiTourSeen('old-access-token', true);
+      const restart = patchAnansiTourSeen('refreshed-access-token', false);
+
+      await Promise.resolve();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(15_000);
+
+      await expect(markSeen).rejects.toMatchObject({ name: 'AbortError' });
+      await expect(restart).resolves.toEqual(meResponse(null));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(
+        JSON.stringify({ tour_seen: false }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
