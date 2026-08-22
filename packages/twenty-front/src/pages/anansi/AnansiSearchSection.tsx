@@ -4,6 +4,7 @@
 // Rate floor is an integer; a blank input means "unset" (sent as null).
 import { useLingui } from '@lingui/react/macro';
 import { Card, CardContent } from 'twenty-ui/surfaces';
+import { InputHint } from 'twenty-ui/input';
 import { H2Title } from 'twenty-ui/typography';
 import { Section } from 'twenty-ui/layout';
 
@@ -17,6 +18,10 @@ type AnansiSearchSectionProps = {
   remoteOnlyError?: string;
   relocationError?: string;
   rateFloorError?: string;
+  // ANANSI PATCH (WS-B fix round 1, Critical #1): true until the initial
+  // `GET /v1/policy` has succeeded at least once -- see AnansiResumeSection
+  // for why writing before that must be refused.
+  disabled?: boolean;
   onToggleRemoteOnly: (nextOn: boolean) => void;
   onToggleRelocation: (nextOn: boolean) => void;
   onRateFloorChange: (nextValue: string) => void;
@@ -30,6 +35,7 @@ export const AnansiSearchSection = ({
   remoteOnlyError,
   relocationError,
   rateFloorError,
+  disabled,
   onToggleRemoteOnly,
   onToggleRelocation,
   onRateFloorChange,
@@ -47,6 +53,7 @@ export const AnansiSearchSection = ({
             value={remoteOnly}
             onChange={onToggleRemoteOnly}
             error={remoteOnlyError}
+            disabled={disabled}
           />
         </CardContent>
         <CardContent>
@@ -55,6 +62,7 @@ export const AnansiSearchSection = ({
             value={relocation}
             onChange={onToggleRelocation}
             error={relocationError}
+            disabled={disabled}
           />
         </CardContent>
       </Card>
@@ -66,7 +74,13 @@ export const AnansiSearchSection = ({
         onBlur={onRateFloorBlur}
         error={rateFloorError}
         placeholder={t`No minimum`}
+        disabled={disabled}
       />
+      {disabled && (
+        <InputHint danger>
+          {t`Couldn't load your policy settings -- use Retry above to try again.`}
+        </InputHint>
+      )}
     </Section>
   );
 };

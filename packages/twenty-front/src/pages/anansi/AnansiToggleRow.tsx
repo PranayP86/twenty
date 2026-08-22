@@ -37,6 +37,11 @@ type AnansiToggleRowProps = {
   value?: boolean;
   onChange?: (nextValue: boolean) => void;
   error?: string;
+  // ANANSI PATCH (WS-B fix round 1, Critical #1): lets a parent section
+  // make its control genuinely non-interactive (e.g. the policy document
+  // hasn't successfully loaded yet, so writing would risk a full-document
+  // wipe) without hiding the row entirely.
+  disabled?: boolean;
 };
 
 export const AnansiToggleRow = ({
@@ -45,6 +50,7 @@ export const AnansiToggleRow = ({
   value,
   onChange,
   error,
+  disabled,
 }: AnansiToggleRowProps) => (
   <StyledRow>
     <StyledRowMain>
@@ -52,7 +58,12 @@ export const AnansiToggleRow = ({
       {disabledLabel ? (
         <StyledDisabledLabel>{disabledLabel}</StyledDisabledLabel>
       ) : (
-        <Toggle value={value} onChange={onChange} aria-label={title} />
+        <Toggle
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          aria-label={title}
+        />
       )}
     </StyledRowMain>
     {error && <InputHint danger>{error}</InputHint>}

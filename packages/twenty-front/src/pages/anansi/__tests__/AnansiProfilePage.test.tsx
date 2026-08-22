@@ -281,4 +281,77 @@ describe('AnansiProfilePage', () => {
       expect(screen.getByLabelText('Timezone')).toHaveValue('Europe/Berlin');
     });
   });
+
+  // ANANSI PATCH (WS-B fix round 1, Critical #1 spec case): a failed
+  // `GET /v1/policy` must leave Resume/Search non-interactive -- a PUT
+  // built from the `{}` default would wipe the whole server-side document
+  // (automation/remote_only/relocation/rate_floor/plugins) on the very next
+  // edit, since PUT /v1/policy replaces the document rather than merging.
+  it('disables Resume and Search when the initial policy GET fails, and refuses to PUT', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(buildMeResponse())],
+      'GET /v1/policy': [jsonError(500)],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Couldn't load your profile settings."),
+      ).toBeInTheDocument();
+    });
+
+    // GET /v1/me still succeeded independently (Promise.allSettled, not
+    // Promise.all) -- Availability reflects it even though policy failed.
+    expect(screen.getByLabelText('Timezone')).toHaveValue('America/New_York');
+
+    expect(screen.getByLabelText('Rate floor')).toBeDisabled();
+    expect(
+      screen.getByText(
+        "Couldn't load your policy settings -- use Retry above to try again.",
+      ),
+    ).toBeInTheDocument();
+
+    fetchMock.mockClear();
+    fireEvent.click(screen.getByRole('switch', { name: 'Remote only' }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('Retry recovers after an initial policy GET failure', async () => {
+    const fetchMock = mockFetchRouter({
+      // Retry re-runs loadProfile, which re-fetches BOTH endpoints -- queue
+      // two responses for /v1/me too, even though only /v1/policy differs
+      // between attempts.
+      'GET /v1/me': [jsonOk(buildMeResponse()), jsonOk(buildMeResponse())],
+      'GET /v1/policy': [jsonError(500), jsonOk(buildPolicyResponse())],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Couldn't load your profile settings."),
+      ).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Rate floor')).not.toBeDisabled();
+    });
+    expect(
+      screen.queryByText("Couldn't load your profile settings."),
+    ).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${ANANSI_API_URL}/v1/policy`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${ACCESS_TOKEN}`,
+        }),
+      }),
+    );
+  });
 });
