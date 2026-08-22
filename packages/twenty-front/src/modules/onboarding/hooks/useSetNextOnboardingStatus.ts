@@ -68,9 +68,13 @@ const getNextOnboardingStatus = ({
   }
 
   if (currentUser?.onboardingStatus === OnboardingStatus.PROFILE_CREATION) {
-    if (currentWorkspace?.workspaceMembersCount === 1) {
-      return OnboardingStatus.INVITE_TEAM;
-    }
+    // ANANSI PATCH (WS-C): stock invite-team branching is suppressed for
+    // Anansi workspaces; profile creation always advances into our wizard.
+    return OnboardingStatus.ANANSI_WIZARD;
+  }
+  // ANANSI PATCH (WS-C): completing the non-reversible wizard resumes the
+  // stock billing/book-call tail (COMPLETED when those features are disabled).
+  if (currentUser?.onboardingStatus === OnboardingStatus.ANANSI_WIZARD) {
     return statusAfterInviteTeam;
   }
   if (currentUser?.onboardingStatus === OnboardingStatus.INVITE_TEAM) {

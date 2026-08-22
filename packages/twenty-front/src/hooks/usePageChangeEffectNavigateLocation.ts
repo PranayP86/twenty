@@ -143,6 +143,15 @@ export const usePageChangeEffectNavigateLocation = () => {
     return AppPath.CreateProfile;
   }
 
+  // ANANSI PATCH (WS-C): mirror the server chain slot immediately after
+  // profile creation and keep pending wizard users on the shared /welcome URL.
+  if (
+    onboardingStatus === OnboardingStatus.ANANSI_WIZARD &&
+    !isMatchingLocation(location, AppPath.AnansiWizard)
+  ) {
+    return AppPath.AnansiWizard;
+  }
+
   if (
     onboardingStatus === OnboardingStatus.SYNC_EMAIL &&
     !isMatchingLocation(location, AppPath.SyncEmails)

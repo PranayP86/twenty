@@ -9,6 +9,9 @@ export enum AppPath {
   // Onboarding
   WorkspaceActivation = '/workspace-activation',
   CreateProfile = '/create/profile',
+  // ANANSI PATCH (WS-C): the signed-in wizard intentionally shares the
+  // public welcome URL; the workspace router selects the page by status.
+  AnansiWizard = '/welcome',
   SyncEmails = '/sync/emails',
   InstallApps = '/install-apps',
   InviteTeam = '/invite-team',

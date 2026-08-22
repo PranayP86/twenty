@@ -4256,6 +4256,9 @@ export enum ObjectRecordGroupByDateGranularity {
 
 /** Onboarding status */
 export enum OnboardingStatus {
+  // ANANSI PATCH (WS-C): committed generated metadata must mirror the server
+  // enum because local GraphQL code generation is intentionally not run.
+  ANANSI_WIZARD = 'ANANSI_WIZARD',
   APPS_INSTALLATION = 'APPS_INSTALLATION',
   BOOK_CALL = 'BOOK_CALL',
   COMPLETED = 'COMPLETED',

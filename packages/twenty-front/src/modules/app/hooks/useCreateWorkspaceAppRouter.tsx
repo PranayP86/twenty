@@ -19,11 +19,13 @@ import { OnboardingPageLoader } from '@/onboarding/components/OnboardingPageLoad
 import { OnboardingStepLayout } from '@/onboarding/components/OnboardingStepLayout';
 import { OnboardingStepPageLoader } from '@/onboarding/components/OnboardingStepPageLoader';
 import { OnboardingTransitionOutlet } from '@/onboarding/components/OnboardingTransitionOutlet';
+import { useOnboardingStatus } from '@/onboarding/hooks/useOnboardingStatus';
 import { RecordIndexSkeletonLoader } from '@/object-record/record-index/components/RecordIndexSkeletonLoader';
 import { AuthFlowLayout } from '@/ui/layout/page/components/AuthFlowLayout';
 import { BlankLayout } from '@/ui/layout/page/components/BlankLayout';
 import { DefaultLayout } from '@/ui/layout/page/components/DefaultLayout';
 import { MainAppLayoutWithSidePanel } from '@/ui/layout/page/components/MainAppLayoutWithSidePanel';
+import { OnboardingStatus } from '~/generated-metadata/graphql';
 import { Verify } from '~/pages/onboarding/Verify';
 import { lazyWithPreload } from '~/utils/lazyWithPreload';
 
@@ -66,6 +68,14 @@ const WorkspaceActivation = lazyWithPreload(() =>
 const CreateProfile = lazyWithPreload(() =>
   import('~/pages/onboarding/CreateProfile').then((module) => ({
     default: module.CreateProfile,
+  })),
+);
+
+// ANANSI PATCH (WS-C): Task 9 supplies this page; Task 8 wires its lazy route
+// at the onboarding-chain boundary without running local code generation.
+const AnansiWizard = lazyWithPreload(() =>
+  import('~/pages/onboarding/AnansiWizard').then((module) => ({
+    default: module.AnansiWizard,
   })),
 );
 
@@ -138,9 +148,47 @@ const NotFound = lazy(() =>
   })),
 );
 
+// ANANSI PATCH (WS-C): SignInUp and AnansiWizard intentionally both use
+// /welcome. A status-aware route avoids ambiguous duplicate route matches
+// while preserving the public sign-in page and the wizard's stock step layout.
+const AnansiWelcomeLayout = () => {
+  const onboardingStatus = useOnboardingStatus();
+
+  return onboardingStatus === OnboardingStatus.ANANSI_WIZARD ? (
+    <OnboardingStepLayout />
+  ) : (
+    <OnboardingTransitionOutlet />
+  );
+};
+
+// ANANSI PATCH (WS-C): select the /welcome page from the same status used by
+// navigation so anonymous visitors still see SignInUp and pending users see
+// the wizard after Task 9 supplies it.
+const AnansiWelcomePage = () => {
+  const onboardingStatus = useOnboardingStatus();
+  const isAnansiWizard =
+    onboardingStatus === OnboardingStatus.ANANSI_WIZARD;
+
+  return (
+    <LazyRoute
+      fallback={
+        isAnansiWizard ? (
+          <OnboardingStepPageLoader />
+        ) : (
+          <OnboardingPageLoader />
+        )
+      }
+    >
+      {isAnansiWizard ? <AnansiWizard /> : <SignInUp />}
+    </LazyRoute>
+  );
+};
+
 const preloadOnboardingPages = () => {
   WorkspaceActivation.preload();
   CreateProfile.preload();
+  // ANANSI PATCH (WS-C): preload the wizard with the neighboring chain pages.
+  AnansiWizard.preload();
   SyncEmails.preload();
   InstallApps.preload();
   InviteTeam.preload();
@@ -265,18 +313,21 @@ const createWorkspaceAppRouter = (
           />
         </Route>
         <Route element={<BlankLayout />}>
+          {/* ANANSI PATCH (WS-C): /welcome remains the public sign-in URL and
+              becomes the wizard URL only when the onboarding status says so. */}
+          <Route
+            element={<AnansiWelcomeLayout />}
+            loader={preloadOnboardingPages}
+          >
+            <Route
+              path={AppPath.AnansiWizard}
+              element={<AnansiWelcomePage />}
+            />
+          </Route>
           <Route
             element={<OnboardingTransitionOutlet />}
             loader={preloadOnboardingPages}
           >
-            <Route
-              path={AppPath.SignInUp}
-              element={
-                <LazyRoute fallback={<OnboardingPageLoader />}>
-                  <SignInUp />
-                </LazyRoute>
-              }
-            />
             <Route
               path={AppPath.Invite}
               element={
