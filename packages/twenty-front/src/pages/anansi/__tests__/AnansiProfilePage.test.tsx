@@ -282,6 +282,64 @@ describe('AnansiProfilePage', () => {
     });
   });
 
+  // ANANSI PATCH (WS-B final review I1): PUT /v1/policy replaces the whole
+  // document, so a Search/Resume save must carry the LIVE automation map, not
+  // the page-load snapshot. Otherwise an autonomy toggle made earlier in the
+  // session is silently written back -- re-enabling autonomy the user just
+  // turned off. Toggle Replies ON, then flip Remote only, and assert the PUT
+  // body's automation reflects the toggle (replies: 2), not the load-time 1.
+  it('a policy PUT carries the post-toggle automation, not the stale snapshot', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(buildMeResponse())],
+      'GET /v1/policy': [jsonOk(buildPolicyResponse())],
+      'POST /v1/automation/replies': [
+        jsonOk({
+          applications: 2,
+          replies: 2,
+          negotiation: 1,
+          prescreen: 1,
+          scheduling: 1,
+          outreach: 1,
+        }),
+      ],
+      'PUT /v1/policy': [
+        jsonOk(buildPolicyResponse({ remote_only: false }, 4)),
+      ],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('switch', { name: 'Replies' }),
+      ).not.toBeChecked();
+    });
+
+    // Turn Replies ON and let the POST resolve (replies -> level 2).
+    await act(async () => {
+      fireEvent.click(screen.getByRole('switch', { name: 'Replies' }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Replies' })).toBeChecked();
+    });
+
+    // Now flip a Search toggle -> triggers PUT /v1/policy.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('switch', { name: 'Remote only' }));
+    });
+
+    const putCall = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PUT',
+    );
+    expect(putCall).toBeDefined();
+    const putBody = JSON.parse(
+      (putCall?.[1] as RequestInit).body as string,
+    );
+    // The toggle must survive the whole-document replace:
+    expect(putBody.policy.automation.replies).toBe(2);
+    expect(putBody.policy.remote_only).toBe(false);
+  });
+
   // ANANSI PATCH (WS-B fix round 1, Critical #1 spec case): a failed
   // `GET /v1/policy` must leave Resume/Search non-interactive -- a PUT
   // built from the `{}` default would wipe the whole server-side document

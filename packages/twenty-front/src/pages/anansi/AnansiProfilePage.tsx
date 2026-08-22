@@ -206,6 +206,16 @@ export const AnansiProfilePage = () => {
           level,
         );
         setAutomation(nextAutomation);
+        // ANANSI PATCH (WS-B final review I1): keep `policy.automation` in
+        // sync with the live automation map on every successful toggle.
+        // updatePolicyField PUTs the WHOLE policy document (the server
+        // replaces it verbatim), so a later Resume/Search save built from a
+        // `policy` whose `automation` key still held the page-load snapshot
+        // would silently write this toggle back -- re-enabling autonomy the
+        // user just turned off (the worst direction to fail). Syncing here,
+        // plus overlaying the latest map in updatePolicyField below, closes
+        // that window from both sides.
+        setPolicy((current) => ({ ...current, automation: nextAutomation }));
       } catch (error) {
         setAutomation((current) => ({ ...current, [chunk]: previousLevel }));
         setFieldError(chunk, saveErrorMessage);
@@ -228,7 +238,13 @@ export const AnansiProfilePage = () => {
       // clobber a different field's concurrent successful update.
       const patchKey = Object.keys(patch)[0] as keyof AnansiPolicyDocument;
       const previousValue = policy[patchKey];
-      const optimisticPolicy = { ...policy, ...patch };
+      // ANANSI PATCH (WS-B final review I1): overlay the LIVE `automation`
+      // map into the PUT body so a stale `policy.automation` -- a toggle made
+      // after page load, or one still in flight -- can never be written back
+      // over the user's choice. The whole document is replaced server-side,
+      // so the body must always carry the current automation, not the
+      // load-time snapshot.
+      const optimisticPolicy = { ...policy, automation, ...patch };
 
       setPolicy(optimisticPolicy);
       setFieldError(key, undefined);
@@ -246,7 +262,14 @@ export const AnansiProfilePage = () => {
         }
       }
     },
-    [accessToken, isPolicyLoaded, policy, saveErrorMessage, setFieldError],
+    [
+      accessToken,
+      automation,
+      isPolicyLoaded,
+      policy,
+      saveErrorMessage,
+      setFieldError,
+    ],
   );
 
   const handleToggleEducationOnResume = useCallback(
