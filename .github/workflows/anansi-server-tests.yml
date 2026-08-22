@@ -36,3 +36,23 @@ jobs:
         run: |
           npx jest --config packages/twenty-server/jest.config.mjs --ci --runInBand \
             "anansi-allowlist\.service\.spec\.ts|sign-in-up\.service\.spec\.ts"
+
+  # ANANSI PATCH: test gate for the Anansi front-end patches (auto-provisioning
+  # gate in SignInUpWorkspaceCreationForm.tsx / AnansiProvisioningScreen.tsx,
+  # and the /profile page in pages/anansi/). Runs only the Anansi-owned spec
+  # files, mirroring the server job above — not the full upstream twenty-front
+  # suite (see .github/workflows/ci-front.yaml for that).
+  front-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        uses: ./.github/actions/yarn-install
+      - name: Build workspace dependencies
+        run: npx nx run-many --target=build --projects=twenty-shared,twenty-ui,twenty-front-component-renderer
+      - name: Run Anansi front tests
+        run: |
+          npx jest --config packages/twenty-front/jest.config.mjs --ci --runInBand \
+            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"
