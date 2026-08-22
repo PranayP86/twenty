@@ -163,3 +163,131 @@ describe('SignInUpService - allowlist-gated workspace creation', () => {
     expect(isApproved).not.toHaveBeenCalled();
   });
 });
+
+// ANANSI PATCH (WS-C): exercise the real new-workspace path so stock-step
+// suppression and wizard arming cannot drift apart behind private helpers.
+describe('SignInUpService - Anansi new-workspace onboarding', () => {
+  it('arms only profile creation and the Anansi wizard', async () => {
+    const user = {
+      id: 'user-1',
+      email: 'friend@gmail.com',
+      canAccessFullAdminPanel: false,
+    } as UserEntity;
+    const userRepository = {
+      count: jest.fn().mockResolvedValue(1),
+    };
+    const workspaceRepository = {
+      count: jest.fn().mockResolvedValue(0),
+      create: jest.fn((workspace: object) => workspace),
+    };
+    const userWorkspaceService = {
+      create: jest.fn().mockResolvedValue(undefined),
+    };
+    const onboardingService = {
+      setOnboardingConnectAccountPending: jest.fn(),
+      setOnboardingCreateProfilePending: jest.fn().mockResolvedValue(undefined),
+      setOnboardingInstallAppsPending: jest.fn(),
+      setOnboardingInviteTeamPending: jest.fn(),
+      setOnboardingAnansiWizardPending: jest.fn().mockResolvedValue(undefined),
+    };
+    const twentyConfigService = {
+      get: jest.fn().mockReturnValue(false),
+    };
+    const subdomainManagerService = {
+      generateSubdomain: jest.fn().mockResolvedValue('friend'),
+    };
+    const workspaceCacheService = {
+      invalidateAndRecompute: jest.fn().mockResolvedValue(undefined),
+    };
+    const applicationService = {
+      createWorkspaceCustomApplication: jest.fn().mockResolvedValue({
+        universalIdentifier: 'application-1',
+      }),
+    };
+    const eventLogEmitterService = {
+      createContext: jest.fn().mockReturnValue({
+        insertWorkspaceEvent: jest.fn(),
+      }),
+    };
+    const billingService = {
+      isBillingEnabled: jest.fn().mockReturnValue(false),
+    };
+    const queryRunner = {
+      manager: {
+        save: jest
+          .fn()
+          .mockImplementation(
+            async (_entity: unknown, value: unknown) => value,
+          ),
+      },
+    };
+    const dataSource = {
+      transaction: jest
+        .fn()
+        .mockImplementation(
+          async (
+            callback: (entityManager: {
+              queryRunner: typeof queryRunner;
+            }) => Promise<unknown>,
+          ) => callback({ queryRunner }),
+        ),
+    };
+    const noop = {} as never;
+    const service = new SignInUpService(
+      userRepository as never,
+      workspaceRepository as never,
+      noop,
+      userWorkspaceService as never,
+      onboardingService as never,
+      noop,
+      twentyConfigService as never,
+      subdomainManagerService as never,
+      noop,
+      noop,
+      workspaceCacheService as never,
+      applicationService as never,
+      noop,
+      noop,
+      eventLogEmitterService as never,
+      noop,
+      billingService as never,
+      dataSource as never,
+      noop,
+    );
+
+    await service.signUpOnNewWorkspace(
+      { type: 'existingUser', existingUser: user },
+      { displayName: 'Friend Workspace' },
+    );
+
+    expect(
+      onboardingService.setOnboardingConnectAccountPending,
+    ).not.toHaveBeenCalled();
+    expect(
+      onboardingService.setOnboardingInstallAppsPending,
+    ).not.toHaveBeenCalled();
+    expect(
+      onboardingService.setOnboardingInviteTeamPending,
+    ).not.toHaveBeenCalled();
+    expect(
+      onboardingService.setOnboardingCreateProfilePending,
+    ).toHaveBeenCalledWith(
+      {
+        userId: user.id,
+        workspaceId: expect.any(String),
+        value: true,
+      },
+      queryRunner,
+    );
+    expect(
+      onboardingService.setOnboardingAnansiWizardPending,
+    ).toHaveBeenCalledWith(
+      {
+        userId: user.id,
+        workspaceId: expect.any(String),
+        value: true,
+      },
+      queryRunner,
+    );
+  });
+});

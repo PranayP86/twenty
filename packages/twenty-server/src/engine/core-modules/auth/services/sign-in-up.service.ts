@@ -710,14 +710,19 @@ export class SignInUpService {
             {
               user,
               workspace,
-              shouldShowConnectAccountStep: true,
-              shouldShowInstallAppsStep: true,
+              // ANANSI PATCH (WS-C): anansi-core owns mailbox OAuth.
+              shouldShowConnectAccountStep: false,
+              // ANANSI PATCH (WS-C): stock apps are outside the solo workspace.
+              shouldShowInstallAppsStep: false,
             },
             queryRunner,
           );
 
-          await this.onboardingService.setOnboardingInviteTeamPending(
+          // ANANSI PATCH (WS-C): friends are solo, so arm the Anansi wizard
+          // instead of the stock invite-team tail.
+          await this.onboardingService.setOnboardingAnansiWizardPending(
             {
+              userId: user.id,
               workspaceId: workspace.id,
               value: true,
             },

@@ -32,10 +32,11 @@ jobs:
       # missing when jest requires sign-in-up.service.ts.
       - name: Build workspace dependencies
         run: npx nx run-many --target=build --projects=twenty-shared,twenty-emails,twenty-client-sdk
+      # ANANSI PATCH (WS-C): include the focused wizard-chain service spec.
       - name: Run Anansi server tests
         run: |
           npx jest --config packages/twenty-server/jest.config.mjs --ci --runInBand \
-            "anansi-allowlist\.service\.spec\.ts|sign-in-up\.service\.spec\.ts"
+            "anansi-allowlist\.service\.spec\.ts|sign-in-up\.service\.spec\.ts|onboarding\.service\.anansi\.spec\.ts"
 
   # ANANSI PATCH: test gate for the Anansi front-end patches (auto-provisioning
   # gate in SignInUpWorkspaceCreationForm.tsx / AnansiProvisioningScreen.tsx,

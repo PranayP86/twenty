@@ -59,6 +59,22 @@ export class OnboardingResolver {
     return { success: true };
   }
 
+  // ANANSI PATCH (WS-C): finish Twenty's wizard boundary only after the
+  // front end has completed anansi-core onboarding successfully.
+  @Mutation(() => OnboardingStepSuccessDTO)
+  @UseGuards(NoPermissionGuard)
+  async completeAnansiWizardOnboardingStep(
+    @AuthUser() user: AuthContextUser,
+    @AuthWorkspace() workspace: WorkspaceEntity,
+  ): Promise<OnboardingStepSuccessDTO> {
+    await this.onboardingService.completeOnboardingAnansiWizardStep({
+      userId: user.id,
+      workspaceId: workspace.id,
+    });
+
+    return { success: true };
+  }
+
   @Mutation(() => OnboardingStepSuccessDTO)
   @UseGuards(NoPermissionGuard)
   async completeBookCallOnboardingStep(

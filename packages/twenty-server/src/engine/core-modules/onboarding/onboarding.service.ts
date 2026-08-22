@@ -35,6 +35,8 @@ export enum OnboardingStepKeys {
   ONBOARDING_CONNECT_ACCOUNT_PENDING = 'ONBOARDING_CONNECT_ACCOUNT_PENDING',
   ONBOARDING_INVITE_TEAM_PENDING = 'ONBOARDING_INVITE_TEAM_PENDING',
   ONBOARDING_CREATE_PROFILE_PENDING = 'ONBOARDING_CREATE_PROFILE_PENDING',
+  // ANANSI PATCH (WS-C): user/workspace flag for the single wizard boundary.
+  ONBOARDING_ANANSI_WIZARD_PENDING = 'ONBOARDING_ANANSI_WIZARD_PENDING',
   ONBOARDING_INSTALL_APPS_PENDING = 'ONBOARDING_INSTALL_APPS_PENDING',
   ONBOARDING_BOOK_CALL_PENDING = 'ONBOARDING_BOOK_CALL_PENDING',
   ONBOARDING_BOOK_CALL_OFFERED = 'ONBOARDING_BOOK_CALL_OFFERED',
@@ -45,6 +47,8 @@ export type OnboardingKeyValueTypeMap = {
   [OnboardingStepKeys.ONBOARDING_CONNECT_ACCOUNT_PENDING]: boolean;
   [OnboardingStepKeys.ONBOARDING_INVITE_TEAM_PENDING]: boolean;
   [OnboardingStepKeys.ONBOARDING_CREATE_PROFILE_PENDING]: boolean;
+  // ANANSI PATCH (WS-C): type the wizard boundary's pending flag.
+  [OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING]: boolean;
   [OnboardingStepKeys.ONBOARDING_INSTALL_APPS_PENDING]: boolean;
   [OnboardingStepKeys.ONBOARDING_BOOK_CALL_PENDING]: boolean;
   [OnboardingStepKeys.ONBOARDING_BOOK_CALL_OFFERED]: boolean;
@@ -139,6 +143,11 @@ export class OnboardingService {
       userVars.get(OnboardingStepKeys.ONBOARDING_CREATE_PROFILE_PENDING) ===
       true;
 
+    // ANANSI PATCH (WS-C): pre-extract the wizard flag like stock steps.
+    const isAnansiWizardPending =
+      userVars.get(OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING) ===
+      true;
+
     const isConnectAccountPending =
       userVars.get(OnboardingStepKeys.ONBOARDING_CONNECT_ACCOUNT_PENDING) ===
       true;
@@ -162,6 +171,12 @@ export class OnboardingService {
 
     if (isProfileCreationPending) {
       return OnboardingStatus.PROFILE_CREATION;
+    }
+
+    // ANANSI PATCH (WS-C): the wizard occupies one chain slot after profile
+    // creation; its seven sub-steps remain entirely client-side.
+    if (isAnansiWizardPending) {
+      return OnboardingStatus.ANANSI_WIZARD;
     }
 
     if (isInviteTeamPending) {
@@ -1079,6 +1094,62 @@ export class OnboardingService {
         value: true,
       },
       queryRunner,
+    );
+  }
+
+  // ANANSI PATCH (WS-C): persist the wizard boundary per user and workspace.
+  async setOnboardingAnansiWizardPending(
+    {
+      userId,
+      workspaceId,
+      value,
+    }: {
+      userId: string;
+      workspaceId: string;
+      value: boolean;
+    },
+    queryRunner?: QueryRunner,
+  ) {
+    if (!value) {
+      await this.userVarsService.delete(
+        {
+          userId,
+          workspaceId,
+          key: OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING,
+        },
+        queryRunner,
+      );
+
+      return;
+    }
+
+    await this.userVarsService.set(
+      {
+        userId,
+        workspaceId,
+        key: OnboardingStepKeys.ONBOARDING_ANANSI_WIZARD_PENDING,
+        value: true,
+      },
+      queryRunner,
+    );
+  }
+
+  // ANANSI PATCH (WS-C): serialize wizard completion with every other
+  // onboarding transition, then clear its pending boundary atomically.
+  async completeOnboardingAnansiWizardStep({
+    userId,
+    workspaceId,
+  }: {
+    userId: string;
+    workspaceId: string;
+  }) {
+    await this.runStepTransitionInLockedTransaction(
+      { userId, workspaceId },
+      async (queryRunner) =>
+        this.setOnboardingAnansiWizardPending(
+          { userId, workspaceId, value: false },
+          queryRunner,
+        ),
     );
   }
 
