@@ -23,7 +23,9 @@ const StyledAwakeHoursRow = styled.div`
 // changes within a session. Guarded because Intl.supportedValuesOf is a
 // fairly recent addition and a missing implementation must not crash the
 // whole page, just leave the select with no options.
-const ANANSI_TIMEZONE_OPTIONS: SelectOption<string>[] = (() => {
+// ANANSI PATCH (WS-C): exported for the onboarding wizard so both surfaces
+// share one guarded IANA list instead of duplicating timezone generation.
+export const ANANSI_TIMEZONE_OPTIONS: SelectOption<string>[] = (() => {
   try {
     return Intl.supportedValuesOf('timeZone').map((timeZone) => ({
       label: timeZone,

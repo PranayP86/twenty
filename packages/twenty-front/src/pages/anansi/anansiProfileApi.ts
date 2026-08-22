@@ -23,6 +23,22 @@ export type AnansiMePatch = {
   awake_hours?: AnansiAwakeHours;
 };
 
+// ANANSI PATCH (WS-C): wizard-facing profile and policy shapes mirror the
+// bearer-authenticated Core routes without introducing GraphQL codegen.
+export type AnansiProfileResponse = {
+  version: number | null;
+  profile: Record<string, unknown>;
+};
+
+export type AnansiWorkMode = 'remote_only' | 'in_person_ok' | 'hybrid';
+export type AnansiFluffLevel = 'conservative' | 'balanced' | 'confident';
+export type AnansiLocation = {
+  model: 'anywhere' | 'tz_range' | 'city';
+  city: string | null;
+  radius_mi: number | null;
+  tz_range: [string, string] | null;
+};
+
 // Every top-level key `anansi.policy.KNOWN_POLICY_KEYS` accepts. `automation`
 // is written through the dedicated `POST /v1/automation/{chunk}` route below,
 // never through this page's PUT /v1/policy calls, but it still round-trips
@@ -36,6 +52,12 @@ export type AnansiPolicyDocument = {
   education_on_resume?: boolean;
   rate_floor?: number | null;
   plugins?: unknown;
+  // ANANSI PATCH (WS-C): onboarding-only policy keys accepted by Core Task 1.
+  title_palette?: string[];
+  fluff_level?: AnansiFluffLevel;
+  approved_fluff?: string[];
+  location?: AnansiLocation;
+  work_mode?: AnansiWorkMode;
 };
 
 export type AnansiPolicyResponse = {
@@ -72,14 +94,38 @@ export const getAnansiAutomationLevel = (
   return typeof value === 'number' ? value : 1;
 };
 
-class AnansiApiError extends Error {
+// ANANSI PATCH (WS-C): preserve Core's structured `detail` on failed requests
+// so the wizard can surface onboarding-completion 409s verbatim.
+export class AnansiApiError extends Error {
   constructor(
     public readonly path: string,
     public readonly status: number,
+    public readonly detail?: string,
   ) {
-    super(`ANANSI: ${path} returned ${status}`);
+    super(detail ?? `ANANSI: ${path} returned ${status}`);
   }
 }
+
+const getAnansiApiError = async (
+  path: string,
+  response: Response,
+): Promise<AnansiApiError> => {
+  try {
+    const body: unknown = await response.json();
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      'detail' in body &&
+      typeof body.detail === 'string'
+    ) {
+      return new AnansiApiError(path, response.status, body.detail);
+    }
+  } catch {
+    // A non-JSON error response still retains its status/path fallback below.
+  }
+
+  return new AnansiApiError(path, response.status);
+};
 
 const anansiApiRequest = async <T>(
   path: string,
@@ -96,7 +142,7 @@ const anansiApiRequest = async <T>(
   });
 
   if (!response.ok) {
-    throw new AnansiApiError(path, response.status);
+    throw await getAnansiApiError(path, response);
   }
 
   return response.json() as Promise<T>;
@@ -113,6 +159,55 @@ export const patchAnansiMe = (
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
+
+// ANANSI PATCH (WS-C): wizard resume/profile/completion calls. The multipart
+// request intentionally omits Content-Type so fetch supplies its boundary.
+export const getAnansiProfile = (
+  accessToken: string,
+): Promise<AnansiProfileResponse> =>
+  anansiApiRequest<AnansiProfileResponse>('/v1/profile', accessToken);
+
+export const patchAnansiProfile = (
+  accessToken: string,
+  payload: { target_roles: string[] },
+): Promise<AnansiProfileResponse> =>
+  anansiApiRequest<AnansiProfileResponse>('/v1/profile', accessToken, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const postAnansiResume = async (
+  accessToken: string,
+  file: File,
+): Promise<{ ok: boolean; profile_version: number; parsed: unknown | null }> => {
+  const body = new FormData();
+  body.append('file', file);
+
+  const response = await fetch(`${ANANSI_API_URL}/v1/resume`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body,
+  });
+
+  if (!response.ok) {
+    throw await getAnansiApiError('/v1/resume', response);
+  }
+
+  return response.json() as Promise<{
+    ok: boolean;
+    profile_version: number;
+    parsed: unknown | null;
+  }>;
+};
+
+export const postAnansiOnboardingComplete = (
+  accessToken: string,
+): Promise<{ mode: string; already: boolean }> =>
+  anansiApiRequest<{ mode: string; already: boolean }>(
+    '/v1/onboarding/complete',
+    accessToken,
+    { method: 'POST' },
+  );
 
 export const getAnansiPolicy = (
   accessToken: string,
