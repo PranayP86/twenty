@@ -209,7 +209,7 @@ describe('AnansiWizard', () => {
     const file = new File(['%PDF-1.7'], 'cv.pdf', {
       type: 'application/pdf',
     });
-    fireEvent.change(screen.getByLabelText('PDF resume'), {
+    fireEvent.change(await screen.findByLabelText('PDF resume'), {
       target: { files: [file] },
     });
 
