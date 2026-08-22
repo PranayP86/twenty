@@ -16,11 +16,16 @@ export type AnansiMeResponse = {
   timezone: string | null;
   awake_hours: AnansiAwakeHours | null;
   mode: string;
+  // ANANSI PATCH (WS-C): Core-owned wizard/tour stamps gate the root overlay.
+  onboarding_completed_at: string | null;
+  tour_seen_at: string | null;
 };
 
 export type AnansiMePatch = {
   timezone?: string;
   awake_hours?: AnansiAwakeHours;
+  // ANANSI PATCH (WS-C): true marks the tour seen; false arms a restart.
+  tour_seen?: boolean;
 };
 
 // ANANSI PATCH (WS-C): wizard-facing profile and policy shapes mirror the

@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 
 import { AgentChatProvider } from '@/ai/components/AgentChatProvider';
+// ANANSI PATCH (WS-C): root mount keeps the guided tour alive across routes.
+import { AnansiTourOverlay } from '@/anansi-tour/AnansiTourOverlay';
 import { TrackPageViewEffect } from '@/analytics/components/TrackPageViewEffect';
 import { SharedAppProviders } from '@/app/components/SharedAppProviders';
 import { GotoHotkeysEffectsProvider } from '@/app/effect-components/GotoHotkeysEffectsProvider';
@@ -84,6 +86,8 @@ export const WorkspaceAppProviders = () => {
                   <TrackPageViewEffect />
                   <RequestFreshCaptchaTokenEffect />
                   <PageChangeEffect />
+                  {/* ANANSI PATCH (WS-C): authenticated app-wide tour portal. */}
+                  <AnansiTourOverlay />
                   <WelcomeOverlay />
                   <CompanyEnrichmentOnboardingEffect />
                   <SignOutOnOtherTabSignOutEffect />

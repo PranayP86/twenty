@@ -168,6 +168,8 @@ export type WidgetCardProps = {
   children?: React.ReactNode;
   onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
   onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
+  // ANANSI PATCH (WS-C): explicitly forward the guided-tour data anchor.
+  'data-anansi-tour'?: string;
   'data-testid'?: string;
   'data-widget-id'?: string;
 };
@@ -185,6 +187,8 @@ export const WidgetCard = ({
   children,
   onMouseEnter,
   onMouseLeave,
+  // ANANSI PATCH (WS-C): pass the shell's marker through this wrapper.
+  'data-anansi-tour': dataAnansiTour,
   'data-testid': dataTestId,
   'data-widget-id': dataWidgetId,
 }: WidgetCardProps) => {
@@ -202,6 +206,7 @@ export const WidgetCard = ({
       className={className}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      data-anansi-tour={dataAnansiTour}
       data-testid={dataTestId}
       data-widget-id={dataWidgetId}
     >

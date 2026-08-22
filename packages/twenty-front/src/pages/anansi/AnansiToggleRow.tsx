@@ -52,7 +52,9 @@ export const AnansiToggleRow = ({
   error,
   disabled,
 }: AnansiToggleRowProps) => (
-  <StyledRow>
+  // ANANSI PATCH (WS-C): the tour resolves the first Profile autonomy row at
+  // show-time, after its route navigation has rendered this section.
+  <StyledRow data-anansi-tour="autonomy-toggle">
     <StyledRowMain>
       <StyledTitle>{title}</StyledTitle>
       {disabledLabel ? (

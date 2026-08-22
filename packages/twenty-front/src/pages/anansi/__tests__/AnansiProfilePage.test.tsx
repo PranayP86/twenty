@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { SOURCE_LOCALE } from 'twenty-shared/translations';
 import { ThemeProvider } from 'twenty-ui/theme-constants';
 
+// ANANSI PATCH (WS-C): assert Profile's restart handoff to the root overlay.
+import { anansiTourRequestedState } from '@/anansi-tour/states/anansiTourRequestedState';
 import { ANANSI_API_URL } from '@/auth/constants/AnansiApiUrl';
 import { tokenPairState } from '@/auth/states/tokenPairState';
 import {
@@ -69,6 +71,9 @@ const buildMeResponse = (overrides: Record<string, unknown> = {}) => ({
   timezone: 'America/New_York',
   awake_hours: { start: '09:00', end: '18:00' },
   mode: 'shadow',
+  // ANANSI PATCH (WS-C): mirror the expanded Core /v1/me response.
+  onboarding_completed_at: '2026-08-22T12:00:00+00:00',
+  tour_seen_at: '2026-08-22T12:05:00+00:00',
   ...overrides,
 });
 
@@ -419,5 +424,31 @@ describe('AnansiProfilePage', () => {
         }),
       }),
     );
+  });
+
+  // ANANSI PATCH (WS-C): Core is cleared before the root overlay is requested.
+  it('Restart tour clears the seen stamp and requests the root overlay', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(buildMeResponse())],
+      'GET /v1/policy': [jsonOk(buildPolicyResponse())],
+      'PATCH /v1/me': [
+        jsonOk(buildMeResponse({ tour_seen_at: null })),
+      ],
+    });
+
+    renderPage();
+    await screen.findByRole('button', { name: 'Restart tour' });
+    fireEvent.click(screen.getByRole('button', { name: 'Restart tour' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${ANANSI_API_URL}/v1/me`,
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ tour_seen: false }),
+        }),
+      );
+      expect(jotaiStore.get(anansiTourRequestedState.atom)).toBe(true);
+    });
   });
 });

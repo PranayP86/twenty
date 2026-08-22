@@ -55,7 +55,7 @@ jobs:
         run: npx nx run-many --target=build --projects=twenty-shared,twenty-ui,twenty-front-component-renderer
       - name: Run Anansi front tests
         run: |
-          # ANANSI PATCH (WS-C): exact wizard spec filename keeps the focused
-          # front gate from silently skipping Task 9 coverage.
+          # ANANSI PATCH (WS-C): exact wizard, layout, and guided-tour specs keep
+          # the focused front gate from silently skipping Tasks 9 and 10.
           npx jest --config packages/twenty-front/jest.config.mjs --ci --runInBand \
-            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|AnansiWizard\.test\.tsx|OnboardingStepLayout\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"
+            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|AnansiWizard\.test\.tsx|AnansiTourOverlay\.test\.tsx|OnboardingStepLayout\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"

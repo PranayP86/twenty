@@ -1,0 +1,288 @@
+// ANANSI PATCH (WS-C): focused coverage for Core-gated auto-start, bounded
+// missing-anchor skips, and non-blocking persistence on both close paths.
+import { i18n } from '@lingui/core';
+import { I18nProvider } from '@lingui/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { Provider as JotaiProvider } from 'jotai';
+import { MemoryRouter } from 'react-router-dom';
+import { SOURCE_LOCALE } from 'twenty-shared/translations';
+import { ThemeProvider } from 'twenty-ui/theme-constants';
+
+import { AnansiTourOverlay } from '@/anansi-tour/AnansiTourOverlay';
+import { ANANSI_API_URL } from '@/auth/constants/AnansiApiUrl';
+import { tokenPairState } from '@/auth/states/tokenPairState';
+import { isWelcomeAnimationVisibleState } from '@/onboarding/states/isWelcomeAnimationVisibleState';
+import {
+  jotaiStore,
+  resetJotaiStore,
+} from '@/ui/utilities/state/jotai/jotaiStore';
+import { OnboardingStatus } from '~/generated-metadata/graphql';
+import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
+
+const mockUseOnboardingStatus = jest.fn();
+
+jest.mock('@/onboarding/hooks/useOnboardingStatus', () => ({
+  useOnboardingStatus: () => mockUseOnboardingStatus(),
+}));
+
+dynamicActivate(SOURCE_LOCALE);
+
+const ACCESS_TOKEN = 'fake-access-token';
+const COMPLETED_AT = '2026-08-22T12:00:00+00:00';
+
+let animationFrameTime = 0;
+let nextAnimationFrameId = 1;
+let animationFrameCallbacks = new Map<number, FrameRequestCallback>();
+
+const flushAnimationFrames = async (count: number) => {
+  for (let frame = 0; frame < count; frame += 1) {
+    await act(async () => {
+      const callbacks = [...animationFrameCallbacks.values()];
+      animationFrameCallbacks.clear();
+      animationFrameTime += 1000;
+      callbacks.forEach((callback) => callback(animationFrameTime));
+      await Promise.resolve();
+    });
+  }
+};
+
+const waitForAnimationFrame = () =>
+  waitFor(() => expect(animationFrameCallbacks.size).toBeGreaterThan(0));
+
+const setTokenPair = () => {
+  jotaiStore.set(tokenPairState.atom, {
+    accessOrWorkspaceAgnosticToken: {
+      token: ACCESS_TOKEN,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    },
+    refreshToken: {
+      token: 'fake-refresh-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    },
+  });
+};
+
+const meResponse = (tourSeenAt: string | null) => ({
+  email: 'jane.doe@example.com',
+  timezone: 'UTC',
+  awake_hours: { start: '09:00', end: '18:00' },
+  mode: 'live',
+  onboarding_completed_at: COMPLETED_AT,
+  tour_seen_at: tourSeenAt,
+});
+
+const jsonOk = (body: unknown) => ({
+  ok: true,
+  status: 200,
+  json: () => Promise.resolve(body),
+});
+
+type MockResponse = ReturnType<typeof jsonOk>;
+
+const mockFetchRouter = (responses: Record<string, MockResponse[]>) => {
+  const fetchMock = jest.fn(
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const path = String(input).replace(ANANSI_API_URL, '');
+      const key = `${method} ${path}`;
+      const queue = responses[key];
+
+      if (!queue || queue.length === 0) {
+        throw new Error(`Unmocked ANANSI fetch: ${key}`);
+      }
+
+      return Promise.resolve(queue.shift());
+    },
+  );
+  global.fetch = fetchMock as unknown as typeof fetch;
+  return fetchMock;
+};
+
+const appendAnchor = (attributes: Record<string, string>) => {
+  const anchor = document.createElement('div');
+  anchor.dataset.anansiTestAnchor = 'true';
+
+  for (const [name, value] of Object.entries(attributes)) {
+    anchor.setAttribute(name, value);
+  }
+
+  document.body.append(anchor);
+  return anchor;
+};
+
+const appendAllAnchors = () => {
+  appendAnchor({ id: 'nav-item-anansi-test' });
+  appendAnchor({ 'data-anansi-tour': 'widget-card' });
+  appendAnchor({ 'data-anansi-tour': 'autonomy-toggle' });
+  appendAnchor({ id: 'nav-item-jobs-test' });
+};
+
+const renderOverlay = () =>
+  render(
+    <JotaiProvider store={jotaiStore}>
+      <MemoryRouter initialEntries={['/']}>
+        <ThemeProvider colorScheme="light">
+          <I18nProvider i18n={i18n}>
+            <AnansiTourOverlay />
+          </I18nProvider>
+        </ThemeProvider>
+      </MemoryRouter>
+    </JotaiProvider>,
+  );
+
+const showStop = async (title: string) => {
+  await waitForAnimationFrame();
+  await flushAnimationFrames(2);
+  return screen.findByText(title);
+};
+
+const continueToLastStop = async () => {
+  await showStop('Your dashboard');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await showStop('Live cards');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await showStop('Autonomy switches');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await showStop('Jobs');
+};
+
+describe('AnansiTourOverlay', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetJotaiStore();
+    setTokenPair();
+    mockUseOnboardingStatus.mockReturnValue(OnboardingStatus.COMPLETED);
+    animationFrameTime = 0;
+    nextAnimationFrameId = 1;
+    animationFrameCallbacks = new Map();
+
+    // ANANSI PATCH (WS-C): setup has no rAF shim. Queue callbacks explicitly so
+    // tests control the production polling loop and its four-second deadline.
+    window.requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      const id = nextAnimationFrameId;
+      nextAnimationFrameId += 1;
+      animationFrameCallbacks.set(id, callback);
+      return id;
+    });
+    window.cancelAnimationFrame = jest.fn((id: number) => {
+      animationFrameCallbacks.delete(id);
+    });
+  });
+
+  afterEach(() => {
+    document
+      .querySelectorAll('[data-anansi-test-anchor="true"]')
+      .forEach((anchor) => anchor.remove());
+  });
+
+  it('does not activate when Core says the tour was already seen', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(COMPLETED_AT))],
+    });
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
+  });
+
+  it('auto-starts once for a completed user with an unseen tour', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+    });
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+
+    expect(await showStop('Your dashboard')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('1 of 4')).toBeInTheDocument();
+  });
+
+  it('defers auto-start until the completion welcome animation leaves', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+    });
+    jotaiStore.set(isWelcomeAnimationVisibleState.atom, true);
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
+    expect(animationFrameCallbacks).toHaveSize(0);
+
+    act(() => {
+      jotaiStore.set(isWelcomeAnimationVisibleState.atom, false);
+    });
+
+    expect(await showStop('Your dashboard')).toBeInTheDocument();
+  });
+
+  it('silently skips missing anchors until the next available stop', async () => {
+    mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+    });
+    appendAnchor({ id: 'nav-item-jobs-test' });
+
+    renderOverlay();
+
+    await waitForAnimationFrame();
+    await flushAnimationFrames(30);
+    expect(await screen.findByText('Jobs')).toBeInTheDocument();
+    expect(screen.getByText('4 of 4')).toBeInTheDocument();
+  });
+
+  it('Finish closes immediately and marks the tour seen', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+      'PATCH /v1/me': [jsonOk(meResponse(COMPLETED_AT))],
+    });
+    appendAllAnchors();
+
+    renderOverlay();
+    await continueToLastStop();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+
+    expect(screen.queryByText('Jobs')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${ANANSI_API_URL}/v1/me`,
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ tour_seen: true }),
+        }),
+      ),
+    );
+  });
+
+  it('Skip tour closes immediately and marks the tour seen', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+      'PATCH /v1/me': [jsonOk(meResponse(COMPLETED_AT))],
+    });
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+    await showStop('Your dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Skip tour' }));
+
+    expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${ANANSI_API_URL}/v1/me`,
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ tour_seen: true }),
+        }),
+      ),
+    );
+  });
+});

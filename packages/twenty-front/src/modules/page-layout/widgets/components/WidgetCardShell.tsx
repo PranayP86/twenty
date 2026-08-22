@@ -74,6 +74,7 @@ export const WidgetCardShell = ({
 
   return (
     <WidgetComponentInstanceContext.Provider value={{ instanceId: widget.id }}>
+      {/* ANANSI PATCH (WS-C): stable dashboard anchor for the guided tour. */}
       <WidgetCard
         headerLess={!showHeader}
         variant={variant}
@@ -87,6 +88,7 @@ export const WidgetCardShell = ({
         onMouseLeave={onMouseLeave}
         data-widget-id={widget.id}
         data-testid={dataTestId}
+        data-anansi-tour="widget-card"
         className="widget"
       >
         {showHeader && (

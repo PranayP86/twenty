@@ -9,13 +9,16 @@ import { useLingui } from '@lingui/react/macro';
 import { styled } from '@linaria/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDefined } from 'twenty-shared/utils';
-import { Button, InputHint } from 'twenty-ui/input';
+import { Button, InputHint, LightButton } from 'twenty-ui/input';
 import { Loader } from 'twenty-ui/feedback';
 import { H2Title } from 'twenty-ui/typography';
 import { themeCssVariables } from 'twenty-ui/theme-constants';
 
+// ANANSI PATCH (WS-C): Profile clears Core state and signals the root tour.
+import { anansiTourRequestedState } from '@/anansi-tour/states/anansiTourRequestedState';
 import { tokenPairState } from '@/auth/states/tokenPairState';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
+import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
 import { AnansiAutonomySection } from '~/pages/anansi/AnansiAutonomySection';
 import { AnansiResumeSection } from '~/pages/anansi/AnansiResumeSection';
 import { AnansiSearchSection } from '~/pages/anansi/AnansiSearchSection';
@@ -75,6 +78,10 @@ export const AnansiProfilePage = () => {
   const { t } = useLingui();
   const tokenPair = useAtomStateValue(tokenPairState);
   const accessToken = tokenPair?.accessOrWorkspaceAgnosticToken.token;
+  // ANANSI PATCH (WS-C): restart is persisted first, then handed to the
+  // root-mounted overlay through Jotai.
+  const setIsTourRequested = useSetAtomState(anansiTourRequestedState);
+  const [isRestartingTour, setIsRestartingTour] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -184,6 +191,27 @@ export const AnansiProfilePage = () => {
   const handleRetryLoad = useCallback(() => {
     loadProfile();
   }, [loadProfile]);
+
+  // ANANSI PATCH (WS-C): clear Core's durable seen stamp before requesting the
+  // overlay, so the restart survives a reload as well as starting immediately.
+  const handleRestartTour = useCallback(async () => {
+    if (!isDefined(accessToken) || isRestartingTour) {
+      return;
+    }
+
+    setIsRestartingTour(true);
+
+    try {
+      const response = await patchAnansiMe(accessToken, { tour_seen: false });
+      setMe(response);
+      setIsTourRequested(true);
+    } catch (error) {
+      // oxlint-disable-next-line no-console
+      console.error('ANANSI: could not restart guided tour', error);
+    } finally {
+      setIsRestartingTour(false);
+    }
+  }, [accessToken, isRestartingTour, setIsTourRequested]);
 
   const handleToggleAutomation = useCallback(
     async (chunk: AnansiAutomationChunk, nextOn: boolean) => {
@@ -416,9 +444,17 @@ export const AnansiProfilePage = () => {
 
   return (
     <StyledPageContainer>
+      {/* ANANSI PATCH (WS-C): user-controlled guided-tour restart. */}
       <H2Title
         title={t`Profile`}
         description={t`How Anansi acts on your behalf`}
+        adornment={
+          <LightButton
+            disabled={isRestartingTour}
+            title={t`Restart tour`}
+            onClick={handleRestartTour}
+          />
+        }
       />
       {loadError && (
         <StyledLoadErrorRow>
