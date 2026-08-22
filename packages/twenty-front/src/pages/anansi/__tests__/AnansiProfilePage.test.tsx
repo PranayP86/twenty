@@ -74,6 +74,7 @@ const buildMeResponse = (overrides: Record<string, unknown> = {}) => ({
   // ANANSI PATCH (WS-C): mirror the expanded Core /v1/me response.
   onboarding_completed_at: '2026-08-22T12:00:00+00:00',
   tour_seen_at: '2026-08-22T12:05:00+00:00',
+  tour_state_revision: 0,
   ...overrides,
 });
 
@@ -443,12 +444,18 @@ describe('AnansiProfilePage', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         `${ANANSI_API_URL}/v1/me`,
-        expect.objectContaining({
-          method: 'PATCH',
-          body: JSON.stringify({ tour_seen: false }),
-        }),
+        expect.objectContaining({ method: 'PATCH' }),
       );
       expect(jotaiStore.get(anansiTourRequestedState.atom)).toBe(true);
+    });
+    const patchCall = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+    );
+    const patchBody = (patchCall?.[1] as RequestInit | undefined)?.body;
+    expect(typeof patchBody).toBe('string');
+    expect(JSON.parse(patchBody as string)).toEqual({
+      tour_seen: false,
+      tour_state_revision: expect.any(Number),
     });
   });
 });

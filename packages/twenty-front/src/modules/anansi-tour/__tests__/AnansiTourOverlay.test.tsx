@@ -76,6 +76,7 @@ const meResponse = (tourSeenAt: string | null) => ({
   mode: 'live',
   onboarding_completed_at: COMPLETED_AT,
   tour_seen_at: tourSeenAt,
+  tour_state_revision: 0,
 });
 
 const jsonOk = (body: unknown) => ({
@@ -103,6 +104,22 @@ const mockFetchRouter = (responses: Record<string, MockResponse[]>) => {
   );
   global.fetch = fetchMock as unknown as typeof fetch;
   return fetchMock;
+};
+
+const getTourPatchBody = (fetchMock: jest.Mock, index = 0) => {
+  const patchCalls = fetchMock.mock.calls.filter(
+    ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+  );
+  const body = (patchCalls[index]?.[1] as RequestInit | undefined)?.body;
+
+  if (typeof body !== 'string') {
+    throw new Error(`Missing tour PATCH body at index ${index}`);
+  }
+
+  return JSON.parse(body) as {
+    tour_seen: boolean;
+    tour_state_revision: number;
+  };
 };
 
 const appendAnchor = (attributes: Record<string, string>) => {
@@ -336,14 +353,16 @@ describe('AnansiTourOverlay', () => {
 
     expect(screen.queryByText('Jobs')).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${ANANSI_API_URL}/v1/me`,
-        expect.objectContaining({
-          method: 'PATCH',
-          body: JSON.stringify({ tour_seen: true }),
-        }),
-      ),
+      expect(
+        fetchMock.mock.calls.some(
+          ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+        ),
+      ).toBe(true),
     );
+    expect(getTourPatchBody(fetchMock)).toEqual({
+      tour_seen: true,
+      tour_state_revision: expect.any(Number),
+    });
   });
 
   it('Skip tour closes immediately and marks the tour seen', async () => {
@@ -359,14 +378,16 @@ describe('AnansiTourOverlay', () => {
 
     expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${ANANSI_API_URL}/v1/me`,
-        expect.objectContaining({
-          method: 'PATCH',
-          body: JSON.stringify({ tour_seen: true }),
-        }),
-      ),
+      expect(
+        fetchMock.mock.calls.some(
+          ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+        ),
+      ).toBe(true),
     );
+    expect(getTourPatchBody(fetchMock)).toEqual({
+      tour_seen: true,
+      tour_state_revision: expect.any(Number),
+    });
   });
 
   it('serializes close and restart writes across an access-token refresh', async () => {
@@ -388,11 +409,12 @@ describe('AnansiTourOverlay', () => {
     await Promise.all([markSeen, restart]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(
-      JSON.stringify({ tour_seen: true }),
-    );
-    expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(
-      JSON.stringify({ tour_seen: false }),
+    const closeBody = getTourPatchBody(fetchMock, 0);
+    const restartBody = getTourPatchBody(fetchMock, 1);
+    expect(closeBody.tour_seen).toBe(true);
+    expect(restartBody.tour_seen).toBe(false);
+    expect(restartBody.tour_state_revision).toBeGreaterThan(
+      closeBody.tour_state_revision,
     );
   });
 
@@ -432,8 +454,11 @@ describe('AnansiTourOverlay', () => {
       await expect(markSeen).rejects.toMatchObject({ name: 'AbortError' });
       await expect(restart).resolves.toEqual(meResponse(null));
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBe(
-        JSON.stringify({ tour_seen: false }),
+      const closeBody = getTourPatchBody(fetchMock, 0);
+      const restartBody = getTourPatchBody(fetchMock, 1);
+      expect(restartBody.tour_seen).toBe(false);
+      expect(restartBody.tour_state_revision).toBeGreaterThan(
+        closeBody.tour_state_revision,
       );
     } finally {
       jest.useRealTimers();

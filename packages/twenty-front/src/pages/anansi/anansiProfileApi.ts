@@ -19,6 +19,7 @@ export type AnansiMeResponse = {
   // ANANSI PATCH (WS-C): Core-owned wizard/tour stamps gate the root overlay.
   onboarding_completed_at: string | null;
   tour_seen_at: string | null;
+  tour_state_revision: number;
 };
 
 export type AnansiMePatch = {
@@ -153,8 +154,32 @@ const anansiApiRequest = async <T>(
   return response.json() as Promise<T>;
 };
 
-export const getAnansiMe = (accessToken: string): Promise<AnansiMeResponse> =>
-  anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken);
+let anansiTourStateRevision = 0;
+
+const observeAnansiTourStateRevision = (
+  response: AnansiMeResponse,
+): AnansiMeResponse => {
+  anansiTourStateRevision = Math.max(
+    anansiTourStateRevision,
+    response.tour_state_revision,
+  );
+  return response;
+};
+
+const reserveAnansiTourStateRevision = (): number => {
+  anansiTourStateRevision = Math.max(
+    Date.now(),
+    anansiTourStateRevision + 1,
+  );
+  return anansiTourStateRevision;
+};
+
+export const getAnansiMe = async (
+  accessToken: string,
+): Promise<AnansiMeResponse> =>
+  observeAnansiTourStateRevision(
+    await anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken),
+  );
 
 export const patchAnansiMe = (
   accessToken: string,
@@ -175,6 +200,7 @@ let anansiTourSeenWriteQueue: Promise<unknown> = Promise.resolve();
 const patchAnansiTourSeenWithTimeout = async (
   accessToken: string,
   tourSeen: boolean,
+  tourStateRevision: number,
 ): Promise<AnansiMeResponse> => {
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(
@@ -183,11 +209,16 @@ const patchAnansiTourSeenWithTimeout = async (
   );
 
   try {
-    return await anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken, {
-      method: 'PATCH',
-      body: JSON.stringify({ tour_seen: tourSeen }),
-      signal: controller.signal,
-    });
+    return observeAnansiTourStateRevision(
+      await anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          tour_seen: tourSeen,
+          tour_state_revision: tourStateRevision,
+        }),
+        signal: controller.signal,
+      }),
+    );
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
@@ -197,8 +228,15 @@ export const patchAnansiTourSeen = (
   accessToken: string,
   tourSeen: boolean,
 ): Promise<AnansiMeResponse> => {
+  // Reserve when the user acts, not when the queued request starts. A later
+  // restart therefore carries a higher revision even if the close times out.
+  const tourStateRevision = reserveAnansiTourStateRevision();
   const nextWrite = anansiTourSeenWriteQueue.then(() =>
-    patchAnansiTourSeenWithTimeout(accessToken, tourSeen),
+    patchAnansiTourSeenWithTimeout(
+      accessToken,
+      tourSeen,
+      tourStateRevision,
+    ),
   );
 
   anansiTourSeenWriteQueue = nextWrite.then(
