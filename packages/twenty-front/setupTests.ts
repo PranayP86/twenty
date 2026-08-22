@@ -46,6 +46,16 @@ if (globalThis.ResizeObserver === undefined) {
     ResizeObserverMock as unknown as typeof ResizeObserver;
 }
 
+// jsdom does not implement PointerEvent (https://github.com/jsdom/jsdom/issues/2527);
+// @base-ui/react's Switch (used by twenty-ui's Toggle) constructs one from its
+// onClick handler, so any test that fires a click on a Toggle/switch throws
+// "PointerEvent is not a constructor" without this. Same workaround Base UI's
+// own test suite uses (window.PointerEvent = window.MouseEvent).
+if (typeof window !== 'undefined' && window.PointerEvent === undefined) {
+  (window as unknown as Record<string, unknown>).PointerEvent =
+    window.MouseEvent;
+}
+
 declare global {
   namespace jest {
     interface Matchers<R> {
