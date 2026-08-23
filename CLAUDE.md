@@ -9,8 +9,9 @@ Twenty is an open-source CRM built with modern technologies in a monorepo struct
 ## Anansi Fork Status (2026-08-23)
 
 Work only from Morona repo `/home/pran/Developer/anansi-twenty`. Current local
-branch `fix/anansi-onboarding-live-feedback` is based on `4e29087c74`. Two
-walkthrough fixes are implemented but not committed, pushed, built, or deployed:
+branch `fix/anansi-onboarding-live-feedback` split from `4e29087c74`. Walkthrough
+fixes are committed at `85e88cd344` and pushed in
+[PR #1](https://github.com/PranayP86/twenty/pull/1), but not built or deployed:
 
 - `AnansiProvisioningScreen.tsx` activates the newly created Twenty workspace
   with its bearer token before calling Anansi Core `/v1/provision`. Activation
@@ -39,7 +40,7 @@ cleanup into these fixes.
 Do not reset or delete walkthrough account `praniapx@gmail.com`. It is currently
 live/active with onboarding complete, tour seen at revision 4, and no Core
 bootstrap stamp. Live deployment still uses fork head `4e29087c74`; Flux owns any
-future rollout. Do not commit, push, build, deploy, or mutate the account without
+future rollout. Do not merge the PR, build, deploy, or mutate the account without
 explicit approval.
 
 Morona NixOS needs the untracked `sass-embedded` Dart wrapper already installed
