@@ -131,6 +131,7 @@ export const AnansiTourOverlay = () => {
   const eligibilityCheckedForTokenRef = useRef<string | undefined>(undefined);
   const autoStartEligibleTokenRef = useRef<string | undefined>(undefined);
   const autoStartEligibleRevisionRef = useRef<number | undefined>(undefined);
+  const autoStartInvalidatedForTokenRef = useRef<string | undefined>(undefined);
   const currentTourRouteRef = useRef<string | undefined>(undefined);
   const activeTourTokenRef = useRef<string | undefined>(undefined);
   const activeTourRevisionRef = useRef<number | undefined>(undefined);
@@ -168,6 +169,7 @@ export const AnansiTourOverlay = () => {
     eligibilityCheckedForTokenRef.current = undefined;
     autoStartEligibleTokenRef.current = undefined;
     autoStartEligibleRevisionRef.current = undefined;
+    autoStartInvalidatedForTokenRef.current = undefined;
     currentTourRouteRef.current = undefined;
     activeTourTokenRef.current = undefined;
     activeTourRevisionRef.current = undefined;
@@ -199,6 +201,7 @@ export const AnansiTourOverlay = () => {
         if (
           !isCancelled &&
           sessionAccessTokenRef.current === accessToken &&
+          autoStartInvalidatedForTokenRef.current !== accessToken &&
           me.onboarding_completed_at !== null &&
           me.tour_seen_at === null
         ) {
@@ -225,6 +228,7 @@ export const AnansiTourOverlay = () => {
   useEffect(() => {
     const tourStateRevision = autoStartEligibleRevisionRef.current;
     if (
+      isDefined(requestedTour) ||
       !isAutoStartEligible ||
       isWelcomeAnimationVisible ||
       !isDefined(accessToken) ||
@@ -242,6 +246,7 @@ export const AnansiTourOverlay = () => {
     accessToken,
     isAutoStartEligible,
     isWelcomeAnimationVisible,
+    requestedTour,
     startTour,
   ]);
 
@@ -262,6 +267,10 @@ export const AnansiTourOverlay = () => {
       return;
     }
 
+    autoStartInvalidatedForTokenRef.current = accessToken;
+    autoStartEligibleTokenRef.current = undefined;
+    autoStartEligibleRevisionRef.current = undefined;
+    setIsAutoStartEligible(false);
     setIsTourRequested(null);
     startTour(
       requestedTour.accessToken,

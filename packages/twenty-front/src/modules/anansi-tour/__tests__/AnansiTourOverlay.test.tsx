@@ -427,6 +427,42 @@ describe('AnansiTourOverlay', () => {
     });
   });
 
+  it('ignores eligibility that resolves after an explicit restart', async () => {
+    let resolveEligibility: (response: MockResponse) => void = () => undefined;
+    const eligibilityResponse = new Promise<MockResponse>((resolve) => {
+      resolveEligibility = resolve;
+    });
+    const fetchMock = jest
+      .fn()
+      .mockImplementationOnce(() => eligibilityResponse)
+      .mockResolvedValueOnce(jsonOk(meResponse(COMPLETED_AT, 8)));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => {
+      jotaiStore.set(anansiTourRequestedState.atom, {
+        accessToken: ACCESS_TOKEN,
+        tourStateRevision: 7,
+      });
+    });
+    await showStop('Your dashboard');
+
+    await act(async () => {
+      resolveEligibility(jsonOk(meResponse(null, 6)));
+      await eligibilityResponse;
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Skip tour' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(getTourPatchBody(fetchMock)).toEqual({
+      tour_seen: true,
+      tour_state_revision: 7,
+    });
+  });
+
   it('drops a requested restart from a previous access token', async () => {
     const fetchMock = mockFetchRouter({
       'GET /v1/me': [jsonOk(meResponse(COMPLETED_AT, 4))],
