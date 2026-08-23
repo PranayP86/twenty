@@ -25,8 +25,6 @@ export type AnansiMeResponse = {
 export type AnansiMePatch = {
   timezone?: string;
   awake_hours?: AnansiAwakeHours;
-  // ANANSI PATCH (WS-C): true marks the tour seen; false arms a restart.
-  tour_seen?: boolean;
 };
 
 // ANANSI PATCH (WS-C): wizard-facing profile and policy shapes mirror the
@@ -154,32 +152,10 @@ const anansiApiRequest = async <T>(
   return response.json() as Promise<T>;
 };
 
-let anansiTourStateRevision = 0;
-
-const observeAnansiTourStateRevision = (
-  response: AnansiMeResponse,
-): AnansiMeResponse => {
-  anansiTourStateRevision = Math.max(
-    anansiTourStateRevision,
-    response.tour_state_revision,
-  );
-  return response;
-};
-
-const reserveAnansiTourStateRevision = (): number => {
-  anansiTourStateRevision = Math.max(
-    Date.now(),
-    anansiTourStateRevision + 1,
-  );
-  return anansiTourStateRevision;
-};
-
-export const getAnansiMe = async (
+export const getAnansiMe = (
   accessToken: string,
 ): Promise<AnansiMeResponse> =>
-  observeAnansiTourStateRevision(
-    await anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken),
-  );
+  anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken);
 
 export const patchAnansiMe = (
   accessToken: string,
@@ -192,16 +168,16 @@ export const patchAnansiMe = (
 
 // ANANSI PATCH (WS-C): tour close and Profile restart can happen back-to-back,
 // including across an access-token refresh. Serialize all tour-seen writes so a
-// slow `true` response cannot land after a later `false` restart. Bound each
-// request so one lost connection cannot block every later write forever.
+// slow `true` response cannot land after a later `false` restart. Bound every
+// queued request so one lost connection cannot block later writes forever.
+// Core owns the revision: each operation reads the current value, then PATCHes
+// it as a compare-and-swap. This stays correct across tabs, users, and clocks.
 const ANANSI_TOUR_SEEN_WRITE_TIMEOUT_MS = 15_000;
 let anansiTourSeenWriteQueue: Promise<unknown> = Promise.resolve();
 
-const patchAnansiTourSeenWithTimeout = async (
-  accessToken: string,
-  tourSeen: boolean,
-  tourStateRevision: number,
-): Promise<AnansiMeResponse> => {
+const runAnansiTourRequestWithTimeout = async <T>(
+  request: (signal: AbortSignal) => Promise<T>,
+): Promise<T> => {
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(
     () => controller.abort(),
@@ -209,18 +185,65 @@ const patchAnansiTourSeenWithTimeout = async (
   );
 
   try {
-    return observeAnansiTourStateRevision(
-      await anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          tour_seen: tourSeen,
-          tour_state_revision: tourStateRevision,
-        }),
-        signal: controller.signal,
-      }),
-    );
+    return await request(controller.signal);
   } finally {
     globalThis.clearTimeout(timeoutId);
+  }
+};
+
+const getAnansiMeWithTimeout = (
+  accessToken: string,
+): Promise<AnansiMeResponse> =>
+  runAnansiTourRequestWithTimeout((signal) =>
+    anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken, { signal }),
+  );
+
+const patchAnansiTourSeenWithTimeout = (
+  accessToken: string,
+  tourSeen: boolean,
+  tourStateRevision: number,
+): Promise<AnansiMeResponse> =>
+  runAnansiTourRequestWithTimeout((signal) =>
+    anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        tour_seen: tourSeen,
+        tour_state_revision: tourStateRevision,
+      }),
+      signal,
+    }),
+  );
+
+const patchAnansiTourSeenOrdered = async (
+  accessToken: string,
+  tourSeen: boolean,
+): Promise<AnansiMeResponse> => {
+  const current = await getAnansiMeWithTimeout(accessToken);
+
+  try {
+    return await patchAnansiTourSeenWithTimeout(
+      accessToken,
+      tourSeen,
+      current.tour_state_revision,
+    );
+  } catch (error) {
+    if (!(error instanceof AnansiApiError) || error.status !== 409) {
+      throw error;
+    }
+
+    const refreshed = await getAnansiMeWithTimeout(accessToken);
+    if (tourSeen) {
+      // A newer restart won the compare-and-swap. Never replay this stale close.
+      return refreshed;
+    }
+
+    // Restart is the explicit latest user action. Retry it once against the
+    // refreshed server revision; a second conflict is surfaced to the caller.
+    return patchAnansiTourSeenWithTimeout(
+      accessToken,
+      false,
+      refreshed.tour_state_revision,
+    );
   }
 };
 
@@ -228,15 +251,8 @@ export const patchAnansiTourSeen = (
   accessToken: string,
   tourSeen: boolean,
 ): Promise<AnansiMeResponse> => {
-  // Reserve when the user acts, not when the queued request starts. A later
-  // restart therefore carries a higher revision even if the close times out.
-  const tourStateRevision = reserveAnansiTourStateRevision();
   const nextWrite = anansiTourSeenWriteQueue.then(() =>
-    patchAnansiTourSeenWithTimeout(
-      accessToken,
-      tourSeen,
-      tourStateRevision,
-    ),
+    patchAnansiTourSeenOrdered(accessToken, tourSeen),
   );
 
   anansiTourSeenWriteQueue = nextWrite.then(

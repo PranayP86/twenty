@@ -430,10 +430,12 @@ describe('AnansiProfilePage', () => {
   // ANANSI PATCH (WS-C): Core is cleared before the root overlay is requested.
   it('Restart tour clears the seen stamp and requests the root overlay', async () => {
     const fetchMock = mockFetchRouter({
-      'GET /v1/me': [jsonOk(buildMeResponse())],
+      'GET /v1/me': [jsonOk(buildMeResponse()), jsonOk(buildMeResponse())],
       'GET /v1/policy': [jsonOk(buildPolicyResponse())],
       'PATCH /v1/me': [
-        jsonOk(buildMeResponse({ tour_seen_at: null })),
+        jsonOk(
+          buildMeResponse({ tour_seen_at: null, tour_state_revision: 1 }),
+        ),
       ],
     });
 
@@ -455,7 +457,7 @@ describe('AnansiProfilePage', () => {
     expect(typeof patchBody).toBe('string');
     expect(JSON.parse(patchBody as string)).toEqual({
       tour_seen: false,
-      tour_state_revision: expect.any(Number),
+      tour_state_revision: 0,
     });
   });
 });
