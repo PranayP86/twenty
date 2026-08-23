@@ -37,6 +37,7 @@ dynamicActivate(SOURCE_LOCALE);
 
 const ACCESS_TOKEN = 'fake-access-token';
 const COMPLETED_AT = '2026-08-22T12:00:00+00:00';
+const DASHBOARD_ROUTE = '/objects/dashboards/anansi-dashboard-id';
 
 let animationFrameTime = 0;
 let nextAnimationFrameId = 1;
@@ -92,25 +93,21 @@ const jsonError = (status: number, detail: string) => ({
   json: () => Promise.resolve({ detail }),
 });
 
-type MockResponse =
-  | ReturnType<typeof jsonOk>
-  | ReturnType<typeof jsonError>;
+type MockResponse = ReturnType<typeof jsonOk> | ReturnType<typeof jsonError>;
 
 const mockFetchRouter = (responses: Record<string, MockResponse[]>) => {
-  const fetchMock = jest.fn(
-    (input: RequestInfo | URL, init?: RequestInit) => {
-      const method = (init?.method ?? 'GET').toUpperCase();
-      const path = String(input).replace(ANANSI_API_URL, '');
-      const key = `${method} ${path}`;
-      const queue = responses[key];
+  const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const path = String(input).replace(ANANSI_API_URL, '');
+    const key = `${method} ${path}`;
+    const queue = responses[key];
 
-      if (!queue || queue.length === 0) {
-        throw new Error(`Unmocked ANANSI fetch: ${key}`);
-      }
+    if (!queue || queue.length === 0) {
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }
 
-      return Promise.resolve(queue.shift());
-    },
-  );
+    return Promise.resolve(queue.shift());
+  });
   global.fetch = fetchMock as unknown as typeof fetch;
   return fetchMock;
 };
@@ -131,8 +128,11 @@ const getTourPatchBody = (fetchMock: jest.Mock, index = 0) => {
   };
 };
 
-const appendAnchor = (attributes: Record<string, string>) => {
-  const anchor = document.createElement('div');
+const appendAnchor = (
+  attributes: Record<string, string>,
+  elementName: 'a' | 'div' = 'div',
+) => {
+  const anchor = document.createElement(elementName);
   anchor.dataset.anansiTestAnchor = 'true';
 
   for (const [name, value] of Object.entries(attributes)) {
@@ -143,8 +143,11 @@ const appendAnchor = (attributes: Record<string, string>) => {
   return anchor;
 };
 
+const appendAnansiDashboardAnchor = () =>
+  appendAnchor({ id: 'nav-item-anansi-test', href: DASHBOARD_ROUTE }, 'a');
+
 const appendAllAnchors = () => {
-  appendAnchor({ id: 'nav-item-anansi-test' });
+  appendAnansiDashboardAnchor();
   appendAnchor({ 'data-anansi-tour': 'widget-card' });
   appendAnchor({ 'data-anansi-tour': 'autonomy-toggle' });
   appendAnchor({ id: 'nav-item-jobs-test' });
@@ -155,10 +158,10 @@ const LocationProbe = () => {
   return <span data-testid="location-pathname">{location.pathname}</span>;
 };
 
-const renderOverlay = () =>
+const renderOverlay = (initialEntry = '/') =>
   render(
     <JotaiProvider store={jotaiStore}>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <LocationProbe />
         <ThemeProvider colorScheme="light">
           <I18nProvider i18n={i18n}>
@@ -218,7 +221,7 @@ describe('AnansiTourOverlay', () => {
     const fetchMock = mockFetchRouter({
       'GET /v1/me': [jsonOk(meResponse(COMPLETED_AT))],
     });
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
 
@@ -230,7 +233,7 @@ describe('AnansiTourOverlay', () => {
     const fetchMock = mockFetchRouter({
       'GET /v1/me': [jsonOk(meResponse(null))],
     });
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
 
@@ -240,7 +243,8 @@ describe('AnansiTourOverlay', () => {
   });
 
   it('ignores an eligibility response from the previous signed-in user', async () => {
-    let resolveFirstResponse: (response: MockResponse) => void = () => undefined;
+    let resolveFirstResponse: (response: MockResponse) => void = () =>
+      undefined;
     const firstResponse = new Promise<MockResponse>((resolve) => {
       resolveFirstResponse = resolve;
     });
@@ -249,7 +253,7 @@ describe('AnansiTourOverlay', () => {
       .mockImplementationOnce(() => firstResponse)
       .mockResolvedValueOnce(jsonOk(meResponse(COMPLETED_AT)));
     global.fetch = fetchMock as unknown as typeof fetch;
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -275,7 +279,7 @@ describe('AnansiTourOverlay', () => {
         jsonOk(meResponse(COMPLETED_AT)),
       ],
     });
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
     expect(await showStop('Your dashboard')).toBeInTheDocument();
@@ -298,7 +302,7 @@ describe('AnansiTourOverlay', () => {
       'GET /v1/me': [jsonOk(meResponse(null))],
     });
     jotaiStore.set(isWelcomeAnimationVisibleState.atom, true);
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
 
@@ -311,6 +315,20 @@ describe('AnansiTourOverlay', () => {
     });
 
     expect(await showStop('Your dashboard')).toBeInTheDocument();
+  });
+
+  it('navigates to the direct Anansi dashboard before the first stop', async () => {
+    mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(null))],
+    });
+    appendAnansiDashboardAnchor();
+
+    renderOverlay('/profile');
+
+    expect(await showStop('Your dashboard')).toBeInTheDocument();
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent(
+      DASHBOARD_ROUTE,
+    );
   });
 
   it('silently skips missing anchors until the next available stop', async () => {
@@ -327,7 +345,7 @@ describe('AnansiTourOverlay', () => {
     expect(screen.getByText('4 of 4')).toBeInTheDocument();
   });
 
-  it('navigates home again when Back crosses from Profile to a home stop', async () => {
+  it('navigates to the direct Anansi dashboard when Back leaves Profile', async () => {
     mockFetchRouter({
       'GET /v1/me': [jsonOk(meResponse(null))],
     });
@@ -339,12 +357,16 @@ describe('AnansiTourOverlay', () => {
     await showStop('Live cards');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await showStop('Autonomy switches');
-    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/profile');
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent(
+      '/profile',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('location-pathname')).toHaveTextContent('/'),
+      expect(screen.getByTestId('location-pathname')).toHaveTextContent(
+        DASHBOARD_ROUTE,
+      ),
     );
     expect(await showStop('Live cards')).toBeInTheDocument();
   });
@@ -379,7 +401,7 @@ describe('AnansiTourOverlay', () => {
       'GET /v1/me': [jsonOk(meResponse(null)), jsonOk(meResponse(null))],
       'PATCH /v1/me': [jsonOk(meResponse(COMPLETED_AT, 1))],
     });
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
     await showStop('Your dashboard');
@@ -408,7 +430,7 @@ describe('AnansiTourOverlay', () => {
       accessToken: ACCESS_TOKEN,
       tourStateRevision: 7,
     });
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
     await showStop('Your dashboard');
@@ -437,7 +459,7 @@ describe('AnansiTourOverlay', () => {
       .mockImplementationOnce(() => eligibilityResponse)
       .mockResolvedValueOnce(jsonOk(meResponse(COMPLETED_AT, 8)));
     global.fetch = fetchMock as unknown as typeof fetch;
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -471,7 +493,7 @@ describe('AnansiTourOverlay', () => {
       accessToken: 'previous-user-access-token',
       tourStateRevision: 3,
     });
-    appendAnchor({ id: 'nav-item-anansi-test' });
+    appendAnansiDashboardAnchor();
 
     renderOverlay();
 
@@ -599,9 +621,7 @@ describe('AnansiTourOverlay', () => {
   it('does not replay a stale close after a newer restart', async () => {
     const fetchMock = mockFetchRouter({
       'GET /v1/me': [jsonOk(meResponse(null, 1))],
-      'PATCH /v1/me': [
-        jsonError(409, 'tour state changed; refresh and retry'),
-      ],
+      'PATCH /v1/me': [jsonError(409, 'tour state changed; refresh and retry')],
     });
 
     await expect(
@@ -627,9 +647,9 @@ describe('AnansiTourOverlay', () => {
       ],
     });
 
-    await expect(
-      patchAnansiTourSeen('restart-token', false),
-    ).resolves.toEqual(meResponse(null, 2));
+    await expect(patchAnansiTourSeen('restart-token', false)).resolves.toEqual(
+      meResponse(null, 2),
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(getTourPatchBody(fetchMock, 0)).toEqual({

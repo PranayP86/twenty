@@ -6,6 +6,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Twenty is an open-source CRM built with modern technologies in a monorepo structure. The codebase is organized as an Nx workspace with multiple packages.
 
+## Anansi Fork Status (2026-08-23)
+
+Work only from Morona repo `/home/pran/Developer/anansi-twenty`. Current local
+branch `fix/anansi-onboarding-live-feedback` is based on `4e29087c74`. Two
+walkthrough fixes are implemented but not committed, pushed, built, or deployed:
+
+- `AnansiProvisioningScreen.tsx` activates the newly created Twenty workspace
+  with its bearer token before calling Anansi Core `/v1/provision`. Activation
+  and provisioning failures block entry. Manual retry repeats activation then
+  provisioning without recreating the workspace. Twenty server activation is
+  idempotent for `CREATED` and `ACTIVE` workspaces. Activation awaits Standard
+  application creation and `flatApplicationMaps` invalidation/recompute before
+  returning, so Core can resolve the application immediately.
+- `AnansiTourOverlay.tsx` resolves the direct Anansi dashboard record route from
+  rendered navigation link `[id^="nav-item-anansi"]`. Dashboard stops never use
+  `/`; first-stop and Back navigation both use the direct record URL. Missing
+  navigation links follow the existing four-second step-skip policy.
+
+Changed frontend files are the two product files above, their adjacent tests,
+`anansiTourSteps.ts`, and three corrected regression suites whose assertions had
+not tracked earlier Anansi route, redirect, and onboarding changes. Morona
+verification passes: exact Anansi gate 7/7 suites and 44/44 tests; full
+`twenty-front` 1052/1052 suites, 6434/6434 tests, and 139/139 snapshots;
+`twenty-front:typecheck`; Prettier and Oxfmt across all eight changed frontend
+files; and `git diff --check`. Targeted Oxlint still reports 15 pre-existing
+errors in the original walkthrough files (`no-state-useref`, state-variable
+naming, hardcoded overlay color, and one strict-boolean test condition); the
+three corrected regression suites add none. Do not mix that unrelated lint
+cleanup into these fixes.
+
+Do not reset or delete walkthrough account `praniapx@gmail.com`. It is currently
+live/active with onboarding complete, tour seen at revision 4, and no Core
+bootstrap stamp. Live deployment still uses fork head `4e29087c74`; Flux owns any
+future rollout. Do not commit, push, build, deploy, or mutate the account without
+explicit approval.
+
+Morona NixOS needs the untracked `sass-embedded` Dart wrapper already installed
+in `node_modules` because the vendor ELF loader is not NixOS-compatible. A
+focused Yarn install also omitted several cached `@types/lodash.*`, `pluralize`,
+and `@oxlint/plugins` packages; validation uses the locally restored cache
+copies without manifest or lockfile changes.
+
 ## Key Commands
 
 ### Development

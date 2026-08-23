@@ -17,7 +17,7 @@ import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomStat
 import { useMutation } from '@apollo/client/react';
 import { styled } from '@linaria/react';
 import { useLingui } from '@lingui/react/macro';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppPath } from 'twenty-shared/types';
 import { isDefined } from 'twenty-shared/utils';
 import { Loader } from 'twenty-ui/feedback';
@@ -26,6 +26,7 @@ import { MainButton } from 'twenty-ui/input';
 import { AnimatedEaseIn } from 'twenty-ui/layout';
 import { themeCssVariables } from 'twenty-ui/theme-constants';
 import {
+  ActivateWorkspaceDocument,
   GetAuthTokensFromLoginTokenDocument,
   SignUpInNewWorkspaceDocument,
 } from '~/generated-metadata/graphql';
@@ -145,6 +146,33 @@ export const AnansiProvisioningScreen = () => {
   const [getAuthTokensFromLoginTokenMutation] = useMutation(
     GetAuthTokensFromLoginTokenDocument,
   );
+  const [activateWorkspaceMutation] = useMutation(ActivateWorkspaceDocument);
+
+  const activateNewWorkspace = useCallback(
+    async (accessToken: string): Promise<boolean> => {
+      try {
+        const result = await activateWorkspaceMutation({
+          variables: { input: {} },
+          context: {
+            skipAuthToken: true,
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+            },
+          },
+        });
+
+        return (
+          !isDefined(result.error) &&
+          isDefined(result.data?.activateWorkspace.id)
+        );
+      } catch (error) {
+        // oxlint-disable-next-line no-console
+        console.error('ANANSI: workspace activation failed', error);
+        return false;
+      }
+    },
+    [activateWorkspaceMutation],
+  );
 
   const [phase, setPhase] = useState<ProvisioningPhase>('creating');
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
@@ -216,7 +244,10 @@ export const AnansiProvisioningScreen = () => {
           try {
             const { data: tokenData } =
               await getAuthTokensFromLoginTokenMutation({
-                variables: { loginToken: loginToken.token, origin: workspaceUrl },
+                variables: {
+                  loginToken: loginToken.token,
+                  origin: workspaceUrl,
+                },
               });
             accessToken =
               tokenData?.getAuthTokensFromLoginToken.tokens
@@ -231,23 +262,35 @@ export const AnansiProvisioningScreen = () => {
         }
 
         if (isDefined(accessToken)) {
-          // ANANSI PATCH (WS-B): provision failures block + retry — a
-          // failed provision (after the silent retry) now stops the flow
-          // here instead of falling through to the redirect below.
-          const isProvisioned = await provisionWorkspaceWithSilentRetry(
+          provisionRetryContextRef.current = {
             accessToken,
-          );
+            workspaceUrl,
+            loginToken: loginToken.token,
+          };
+
+          const isActivated = await activateNewWorkspace(accessToken);
+
+          // ANANSI PATCH (WS-B): activation or provision failures block +
+          // retry. Core requires activation to create the Standard application
+          // before provisioning can resolve its application ID.
+          if (!isActivated) {
+            if (!isMountedRef.current) {
+              return;
+            }
+
+            setIsCreatingWorkspace(false);
+            setPhase('provisionError');
+            return;
+          }
+
+          const isProvisioned =
+            await provisionWorkspaceWithSilentRetry(accessToken);
 
           if (!isProvisioned) {
             if (!isMountedRef.current) {
               return;
             }
 
-            provisionRetryContextRef.current = {
-              accessToken,
-              workspaceUrl,
-              loginToken: loginToken.token,
-            };
             setIsCreatingWorkspace(false);
             setPhase('provisionError');
             return;
@@ -295,6 +338,7 @@ export const AnansiProvisioningScreen = () => {
 
     run();
   }, [
+    activateNewWorkspace,
     currentUser?.email,
     getAuthTokensFromLoginTokenMutation,
     isMultiWorkspaceEnabled,
@@ -308,9 +352,9 @@ export const AnansiProvisioningScreen = () => {
     setPhase('creating');
   };
 
-  // ANANSI PATCH (WS-B): provision failures block + retry — the workspace
-  // already exists (server-side idempotent), so retry re-calls provision
-  // only; it does not go through handleRetry's full signup re-run above.
+  // ANANSI PATCH (WS-B): activation or provision failures block + retry.
+  // The workspace already exists, so retry re-runs activation and provision
+  // without repeating signup.
   const handleRetryProvision = async () => {
     const retryContext = provisionRetryContextRef.current;
 
@@ -319,6 +363,15 @@ export const AnansiProvisioningScreen = () => {
     }
 
     setIsRetryingProvision(true);
+
+    const isActivated = await activateNewWorkspace(retryContext.accessToken);
+
+    if (!isActivated) {
+      if (isMountedRef.current) {
+        setIsRetryingProvision(false);
+      }
+      return;
+    }
 
     const isProvisioned = await provisionWorkspace(retryContext.accessToken);
 

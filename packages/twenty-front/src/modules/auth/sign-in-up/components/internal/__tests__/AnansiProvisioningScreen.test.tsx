@@ -21,6 +21,7 @@ import {
   resetJotaiStore,
 } from '@/ui/utilities/state/jotai/jotaiStore';
 import {
+  ActivateWorkspaceDocument,
   GetAuthTokensFromLoginTokenDocument,
   SignUpInNewWorkspaceDocument,
 } from '~/generated-metadata/graphql';
@@ -32,6 +33,7 @@ import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
 // settings/security/hooks/__tests__/useCreateSSOIdentityProvider.test.tsx.
 const signUpInNewWorkspaceMock = jest.fn();
 const getAuthTokensFromLoginTokenMock = jest.fn();
+const activateWorkspaceMock = jest.fn();
 
 jest.mock('@apollo/client/react', () => ({
   ...jest.requireActual('@apollo/client/react'),
@@ -41,6 +43,9 @@ jest.mock('@apollo/client/react', () => ({
     }
     if (document === GetAuthTokensFromLoginTokenDocument) {
       return [getAuthTokensFromLoginTokenMock];
+    }
+    if (document === ActivateWorkspaceDocument) {
+      return [activateWorkspaceMock];
     }
     return [jest.fn()];
   },
@@ -93,6 +98,10 @@ const buildSignUpInNewWorkspaceResult = () => ({
       },
     },
   },
+});
+
+const buildActivateWorkspaceResult = () => ({
+  data: { activateWorkspace: { id: 'workspace-id' } },
 });
 
 const buildAuthTokensResult = () => ({
@@ -152,13 +161,15 @@ describe('AnansiProvisioningScreen', () => {
     signUpInNewWorkspaceMock.mockResolvedValue(
       buildSignUpInNewWorkspaceResult(),
     );
-    getAuthTokensFromLoginTokenMock.mockResolvedValue(
-      buildAuthTokensResult(),
-    );
+    getAuthTokensFromLoginTokenMock.mockResolvedValue(buildAuthTokensResult());
+    activateWorkspaceMock.mockResolvedValue(buildActivateWorkspaceResult());
   });
 
-  it('blocks entry and renders the provisionError card when provision fails twice', async () => {
-    mockFetchResponses({ ok: false, status: 500 }, { ok: false, status: 500 });
+  it('activates before provisioning and blocks entry when provision fails twice', async () => {
+    const fetchMock = mockFetchResponses(
+      { ok: false, status: 500 },
+      { ok: false, status: 500 },
+    );
 
     renderScreen();
 
@@ -168,15 +179,28 @@ describe('AnansiProvisioningScreen', () => {
       ).toBeInTheDocument();
     });
 
+    expect(activateWorkspaceMock).toHaveBeenCalledWith({
+      variables: { input: {} },
+      context: {
+        skipAuthToken: true,
+        headers: { authorization: 'Bearer access-token' },
+      },
+    });
+    expect(activateWorkspaceMock.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0],
+    );
     expect(
       screen.getByRole('button', { name: 'Try again' }),
     ).toBeInTheDocument();
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(redirectToWorkspaceDomainMock).not.toHaveBeenCalled();
   });
 
-  it('navigates with no card when the silent auto-retry succeeds after one failure', async () => {
-    mockFetchResponses({ ok: false, status: 500 }, { ok: true });
+  it('navigates when the silent provision retry succeeds after one failure', async () => {
+    const fetchMock = mockFetchResponses(
+      { ok: false, status: 500 },
+      { ok: true },
+    );
 
     renderScreen();
 
@@ -189,18 +213,19 @@ describe('AnansiProvisioningScreen', () => {
       );
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(activateWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(activateWorkspaceMock.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0],
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
       screen.queryByText("Couldn't finish setting up your workspace"),
     ).not.toBeInTheDocument();
   });
 
-  it('re-calls provision only (not signup) on "Try again", and navigates once it succeeds', async () => {
-    mockFetchResponses(
-      { ok: false, status: 500 },
-      { ok: false, status: 500 },
-      { ok: true },
-    );
+  it('retries activation without recreating the workspace', async () => {
+    activateWorkspaceMock.mockRejectedValueOnce(new Error('activation failed'));
+    const fetchMock = mockFetchResponses({ ok: true });
 
     renderScreen();
 
@@ -211,7 +236,8 @@ describe('AnansiProvisioningScreen', () => {
     });
 
     expect(signUpInNewWorkspaceMock).toHaveBeenCalledTimes(1);
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(activateWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -226,9 +252,51 @@ describe('AnansiProvisioningScreen', () => {
       );
     });
 
-    // The workspace already exists by this point (server-side idempotent);
-    // retry must not re-run workspace creation.
     expect(signUpInNewWorkspaceMock).toHaveBeenCalledTimes(1);
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(activateWorkspaceMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(activateWorkspaceMock.mock.invocationCallOrder[1]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('re-runs activation and provision only on setup retry', async () => {
+    const fetchMock = mockFetchResponses(
+      { ok: false, status: 500 },
+      { ok: false, status: 500 },
+      { ok: true },
+    );
+
+    renderScreen();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Try again' }),
+      ).toBeInTheDocument();
+    });
+
+    expect(signUpInNewWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(activateWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    });
+
+    await waitFor(() => {
+      expect(redirectToWorkspaceDomainMock).toHaveBeenCalledWith(
+        WORKSPACE_URL,
+        AppPath.Verify,
+        { loginToken: 'login-token' },
+        '_self',
+      );
+    });
+
+    expect(signUpInNewWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(activateWorkspaceMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(activateWorkspaceMock.mock.invocationCallOrder[1]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[2],
+    );
   });
 });
