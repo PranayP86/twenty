@@ -15,6 +15,7 @@ import { SOURCE_LOCALE } from 'twenty-shared/translations';
 import { ThemeProvider } from 'twenty-ui/theme-constants';
 
 import { AnansiTourOverlay } from '@/anansi-tour/AnansiTourOverlay';
+import { anansiTourRequestedState } from '@/anansi-tour/states/anansiTourRequestedState';
 import { ANANSI_API_URL } from '@/auth/constants/AnansiApiUrl';
 import { tokenPairState } from '@/auth/states/tokenPairState';
 import { isWelcomeAnimationVisibleState } from '@/onboarding/states/isWelcomeAnimationVisibleState';
@@ -398,6 +399,51 @@ describe('AnansiTourOverlay', () => {
     });
   });
 
+  it('closes a requested restart with the persisted restart revision', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(COMPLETED_AT, 7))],
+      'PATCH /v1/me': [jsonOk(meResponse(COMPLETED_AT, 8))],
+    });
+    jotaiStore.set(anansiTourRequestedState.atom, {
+      accessToken: ACCESS_TOKEN,
+      tourStateRevision: 7,
+    });
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+    await showStop('Your dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Skip tour' }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+        ),
+      ).toBe(true),
+    );
+    expect(getTourPatchBody(fetchMock)).toEqual({
+      tour_seen: true,
+      tour_state_revision: 7,
+    });
+  });
+
+  it('drops a requested restart from a previous access token', async () => {
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(meResponse(COMPLETED_AT, 4))],
+    });
+    jotaiStore.set(anansiTourRequestedState.atom, {
+      accessToken: 'previous-user-access-token',
+      tourStateRevision: 3,
+    });
+    appendAnchor({ id: 'nav-item-anansi-test' });
+
+    renderOverlay();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(jotaiStore.get(anansiTourRequestedState.atom)).toBeNull();
+    expect(screen.queryByText('Your dashboard')).not.toBeInTheDocument();
+  });
+
   it('serializes close and restart writes across an access-token refresh', async () => {
     let resolveClosePatch: (response: MockResponse) => void = () => undefined;
     const closePatch = new Promise<MockResponse>((resolve) => {
@@ -405,21 +451,20 @@ describe('AnansiTourOverlay', () => {
     });
     const fetchMock = jest
       .fn()
-      .mockResolvedValueOnce(jsonOk(meResponse(null, 0)))
       .mockImplementationOnce(() => closePatch)
       .mockResolvedValueOnce(jsonOk(meResponse(COMPLETED_AT, 1)))
       .mockResolvedValueOnce(jsonOk(meResponse(null, 2)));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const markSeen = patchAnansiTourSeen('old-access-token', true);
+    const markSeen = patchAnansiTourSeen('old-access-token', true, 0);
     const restart = patchAnansiTourSeen('refreshed-access-token', false);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     resolveClosePatch(jsonOk(meResponse(COMPLETED_AT, 1)));
     await expect(markSeen).resolves.toEqual(meResponse(COMPLETED_AT, 1));
     await expect(restart).resolves.toEqual(meResponse(null, 2));
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(getTourPatchBody(fetchMock, 0)).toEqual({
       tour_seen: true,
       tour_state_revision: 0,
@@ -430,14 +475,32 @@ describe('AnansiTourOverlay', () => {
     });
   });
 
-  it('recovers when a timed-out close later wins on the server', async () => {
+  it('keeps a restart when a timed-out close reaches the server later', async () => {
     jest.useFakeTimers();
-    let callCount = 0;
+    let serverTourSeenAt: string | null = null;
+    let serverRevision = 0;
+    let deliverCloseToServer = () => undefined;
     const fetchMock = jest.fn(
       (_input: RequestInfo | URL, init?: RequestInit) => {
-        callCount += 1;
-        if (callCount === 2) {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (method === 'GET') {
+          return Promise.resolve(
+            jsonOk(meResponse(serverTourSeenAt, serverRevision)),
+          );
+        }
+
+        const body = JSON.parse(String(init?.body)) as {
+          tour_seen: boolean;
+          tour_state_revision: number;
+        };
+        if (body.tour_seen) {
           return new Promise<MockResponse>((_resolve, reject) => {
+            deliverCloseToServer = () => {
+              if (body.tour_state_revision === serverRevision) {
+                serverTourSeenAt = COMPLETED_AT;
+                serverRevision += 1;
+              }
+            };
             init?.signal?.addEventListener(
               'abort',
               () => {
@@ -449,40 +512,37 @@ describe('AnansiTourOverlay', () => {
             );
           });
         }
-        if (callCount === 4) {
+
+        if (body.tour_state_revision !== serverRevision) {
           return Promise.resolve(
             jsonError(409, 'tour state changed; refresh and retry'),
           );
         }
-        if (callCount === 5) {
-          return Promise.resolve(jsonOk(meResponse(COMPLETED_AT, 1)));
-        }
-        if (callCount === 6) {
-          return Promise.resolve(jsonOk(meResponse(null, 2)));
-        }
-        return Promise.resolve(jsonOk(meResponse(null, 0)));
+        serverTourSeenAt = null;
+        serverRevision += 1;
+        return Promise.resolve(
+          jsonOk(meResponse(serverTourSeenAt, serverRevision)),
+        );
       },
     );
     global.fetch = fetchMock as unknown as typeof fetch;
 
     try {
-      const markSeen = patchAnansiTourSeen('old-access-token', true);
+      const markSeen = patchAnansiTourSeen('old-access-token', true, 0);
       const restart = patchAnansiTourSeen('refreshed-access-token', false);
 
       await act(async () => {
-        for (let tick = 0; tick < 5; tick += 1) {
-          await Promise.resolve();
-        }
+        await Promise.resolve();
       });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
 
       await act(async () => {
         jest.advanceTimersByTime(15_000);
       });
 
       await expect(markSeen).rejects.toMatchObject({ name: 'AbortError' });
-      await expect(restart).resolves.toEqual(meResponse(null, 2));
-      expect(fetchMock).toHaveBeenCalledTimes(6);
+      await expect(restart).resolves.toEqual(meResponse(null, 1));
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(getTourPatchBody(fetchMock, 0)).toEqual({
         tour_seen: true,
         tour_state_revision: 0,
@@ -491,31 +551,28 @@ describe('AnansiTourOverlay', () => {
         tour_seen: false,
         tour_state_revision: 0,
       });
-      expect(getTourPatchBody(fetchMock, 2)).toEqual({
-        tour_seen: false,
-        tour_state_revision: 1,
-      });
+
+      deliverCloseToServer();
+      expect(serverTourSeenAt).toBeNull();
+      expect(serverRevision).toBe(1);
     } finally {
       jest.useRealTimers();
     }
   });
 
-  it('does not replay a stale close after a server conflict', async () => {
+  it('does not replay a stale close after a newer restart', async () => {
     const fetchMock = mockFetchRouter({
-      'GET /v1/me': [
-        jsonOk(meResponse(null, 0)),
-        jsonOk(meResponse(null, 1)),
-      ],
+      'GET /v1/me': [jsonOk(meResponse(null, 1))],
       'PATCH /v1/me': [
         jsonError(409, 'tour state changed; refresh and retry'),
       ],
     });
 
     await expect(
-      patchAnansiTourSeen('stale-close-token', true),
+      patchAnansiTourSeen('stale-close-token', true, 0),
     ).resolves.toEqual(meResponse(null, 1));
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(getTourPatchBody(fetchMock)).toEqual({
       tour_seen: true,
       tour_state_revision: 0,

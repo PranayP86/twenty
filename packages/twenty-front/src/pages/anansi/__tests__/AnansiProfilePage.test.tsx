@@ -53,10 +53,10 @@ dynamicActivate(SOURCE_LOCALE);
 
 const ACCESS_TOKEN = 'fake-access-token';
 
-const setTokenPair = () => {
+const setTokenPair = (accessToken = ACCESS_TOKEN) => {
   jotaiStore.set(tokenPairState.atom, {
     accessOrWorkspaceAgnosticToken: {
-      token: ACCESS_TOKEN,
+      token: accessToken,
       expiresAt: '2099-01-01T00:00:00.000Z',
     },
     refreshToken: {
@@ -448,7 +448,10 @@ describe('AnansiProfilePage', () => {
         `${ANANSI_API_URL}/v1/me`,
         expect.objectContaining({ method: 'PATCH' }),
       );
-      expect(jotaiStore.get(anansiTourRequestedState.atom)).toBe(true);
+      expect(jotaiStore.get(anansiTourRequestedState.atom)).toEqual({
+        accessToken: ACCESS_TOKEN,
+        tourStateRevision: 1,
+      });
     });
     const patchCall = fetchMock.mock.calls.find(
       ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
@@ -459,5 +462,62 @@ describe('AnansiProfilePage', () => {
       tour_seen: false,
       tour_state_revision: 0,
     });
+  });
+
+  it('ignores a restart response after the access token changes', async () => {
+    const nextAccessToken = 'next-user-access-token';
+    let resolveRestart: (response: MockResponse) => void = () => undefined;
+    const restartResponse = new Promise<MockResponse>((resolve) => {
+      resolveRestart = resolve;
+    });
+    const fetchMock = jest.fn(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input).replace(ANANSI_API_URL, '');
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (method === 'PATCH') {
+          return restartResponse;
+        }
+        if (path === '/v1/me') {
+          return Promise.resolve(jsonOk(buildMeResponse()));
+        }
+        if (path === '/v1/policy') {
+          return Promise.resolve(jsonOk(buildPolicyResponse()));
+        }
+        throw new Error(`Unmocked ANANSI fetch: ${method} ${path}`);
+      },
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    renderPage();
+    await screen.findByRole('button', { name: 'Restart tour' });
+    fireEvent.click(screen.getByRole('button', { name: 'Restart tour' }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+        ),
+      ).toBe(true),
+    );
+
+    const nextUserRequest = {
+      accessToken: nextAccessToken,
+      tourStateRevision: 99,
+    };
+    await act(async () => {
+      setTokenPair(nextAccessToken);
+      jotaiStore.set(anansiTourRequestedState.atom, nextUserRequest);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolveRestart(
+        jsonOk(buildMeResponse({ tour_seen_at: null, tour_state_revision: 1 })),
+      );
+      await restartResponse;
+      await Promise.resolve();
+    });
+
+    expect(jotaiStore.get(anansiTourRequestedState.atom)).toEqual(
+      nextUserRequest,
+    );
   });
 });

@@ -217,14 +217,25 @@ const patchAnansiTourSeenWithTimeout = (
 const patchAnansiTourSeenOrdered = async (
   accessToken: string,
   tourSeen: boolean,
+  expectedRevision?: number,
 ): Promise<AnansiMeResponse> => {
-  const current = await getAnansiMeWithTimeout(accessToken);
+  let tourStateRevision: number;
+  if (tourSeen) {
+    if (expectedRevision === undefined) {
+      throw new Error('A guided-tour close requires its start revision');
+    }
+    tourStateRevision = expectedRevision;
+  } else {
+    tourStateRevision = (
+      await getAnansiMeWithTimeout(accessToken)
+    ).tour_state_revision;
+  }
 
   try {
     return await patchAnansiTourSeenWithTimeout(
       accessToken,
       tourSeen,
-      current.tour_state_revision,
+      tourStateRevision,
     );
   } catch (error) {
     if (!(error instanceof AnansiApiError) || error.status !== 409) {
@@ -247,12 +258,22 @@ const patchAnansiTourSeenOrdered = async (
   }
 };
 
-export const patchAnansiTourSeen = (
+export function patchAnansiTourSeen(
+  accessToken: string,
+  tourSeen: true,
+  expectedRevision: number,
+): Promise<AnansiMeResponse>;
+export function patchAnansiTourSeen(
+  accessToken: string,
+  tourSeen: false,
+): Promise<AnansiMeResponse>;
+export function patchAnansiTourSeen(
   accessToken: string,
   tourSeen: boolean,
-): Promise<AnansiMeResponse> => {
+  expectedRevision?: number,
+): Promise<AnansiMeResponse> {
   const nextWrite = anansiTourSeenWriteQueue.then(() =>
-    patchAnansiTourSeenOrdered(accessToken, tourSeen),
+    patchAnansiTourSeenOrdered(accessToken, tourSeen, expectedRevision),
   );
 
   anansiTourSeenWriteQueue = nextWrite.then(
@@ -261,7 +282,7 @@ export const patchAnansiTourSeen = (
   );
 
   return nextWrite;
-};
+}
 
 // ANANSI PATCH (WS-C): wizard resume/profile/completion calls. The multipart
 // request intentionally omits Content-Type so fetch supplies its boundary.

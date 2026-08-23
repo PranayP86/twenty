@@ -79,6 +79,8 @@ export const AnansiProfilePage = () => {
   const { t } = useLingui();
   const tokenPair = useAtomStateValue(tokenPairState);
   const accessToken = tokenPair?.accessOrWorkspaceAgnosticToken.token;
+  const currentAccessTokenRef = useRef(accessToken);
+  currentAccessTokenRef.current = accessToken;
   // ANANSI PATCH (WS-C): restart is persisted first, then handed to the
   // root-mounted overlay through Jotai.
   const setIsTourRequested = useSetAtomState(anansiTourRequestedState);
@@ -204,8 +206,17 @@ export const AnansiProfilePage = () => {
 
     try {
       const response = await patchAnansiTourSeen(accessToken, false);
+      if (
+        !isMountedRef.current ||
+        currentAccessTokenRef.current !== accessToken
+      ) {
+        return;
+      }
       setMe(response);
-      setIsTourRequested(true);
+      setIsTourRequested({
+        accessToken,
+        tourStateRevision: response.tour_state_revision,
+      });
     } catch (error) {
       // oxlint-disable-next-line no-console
       console.error('ANANSI: could not restart guided tour', error);

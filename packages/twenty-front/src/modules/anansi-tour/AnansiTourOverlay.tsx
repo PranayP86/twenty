@@ -113,7 +113,7 @@ export const AnansiTourOverlay = () => {
   const onboardingStatus = useOnboardingStatus();
   const tokenPair = useAtomStateValue(tokenPairState);
   const accessToken = tokenPair?.accessOrWorkspaceAgnosticToken.token;
-  const isTourRequested = useAtomStateValue(anansiTourRequestedState);
+  const requestedTour = useAtomStateValue(anansiTourRequestedState);
   const isWelcomeAnimationVisible = useAtomStateValue(
     isWelcomeAnimationVisibleState,
   );
@@ -130,19 +130,25 @@ export const AnansiTourOverlay = () => {
 
   const eligibilityCheckedForTokenRef = useRef<string | undefined>(undefined);
   const autoStartEligibleTokenRef = useRef<string | undefined>(undefined);
+  const autoStartEligibleRevisionRef = useRef<number | undefined>(undefined);
   const currentTourRouteRef = useRef<string | undefined>(undefined);
   const activeTourTokenRef = useRef<string | undefined>(undefined);
+  const activeTourRevisionRef = useRef<number | undefined>(undefined);
   const sessionAccessTokenRef = useRef(accessToken);
 
-  const startTour = useCallback((tourToken: string) => {
-    // ANANSI PATCH (WS-C): remember only the current route group. Steps 1-2
-    // share the redirected home route, but Back from Profile must navigate home
-    // again instead of treating a route visited earlier as permanently done.
-    currentTourRouteRef.current = undefined;
-    activeTourTokenRef.current = tourToken;
-    setStepIndex(0);
-    setIsActive(true);
-  }, []);
+  const startTour = useCallback(
+    (tourToken: string, tourStateRevision: number) => {
+      // ANANSI PATCH (WS-C): remember only the current route group. Steps 1-2
+      // share the redirected home route, but Back from Profile must navigate home
+      // again instead of treating a route visited earlier as permanently done.
+      currentTourRouteRef.current = undefined;
+      activeTourTokenRef.current = tourToken;
+      activeTourRevisionRef.current = tourStateRevision;
+      setStepIndex(0);
+      setIsActive(true);
+    },
+    [],
+  );
 
   // ANANSI PATCH (WS-C): an active tour belongs to the access token that
   // started it. Close immediately on logout, onboarding-state change, or token
@@ -161,14 +167,16 @@ export const AnansiTourOverlay = () => {
 
     eligibilityCheckedForTokenRef.current = undefined;
     autoStartEligibleTokenRef.current = undefined;
+    autoStartEligibleRevisionRef.current = undefined;
     currentTourRouteRef.current = undefined;
     activeTourTokenRef.current = undefined;
+    activeTourRevisionRef.current = undefined;
     setIsAutoStartEligible(false);
     setIsActive(false);
     setAnchorElement(null);
     setAnchorRect(null);
     setIsVisible(false);
-    setIsTourRequested(false);
+    setIsTourRequested(null);
   }, [accessToken, isLogged, onboardingStatus, setIsTourRequested]);
 
   // ANANSI PATCH (WS-C): Core is the per-user source of truth. The token ref
@@ -195,6 +203,7 @@ export const AnansiTourOverlay = () => {
           me.tour_seen_at === null
         ) {
           autoStartEligibleTokenRef.current = accessToken;
+          autoStartEligibleRevisionRef.current = me.tour_state_revision;
           setIsAutoStartEligible(true);
         }
       })
@@ -214,18 +223,21 @@ export const AnansiTourOverlay = () => {
   // ANANSI PATCH (WS-C): Twenty's completion welcome animation owns the same
   // portal layer; wait until it has left before consuming the one-shot start.
   useEffect(() => {
+    const tourStateRevision = autoStartEligibleRevisionRef.current;
     if (
       !isAutoStartEligible ||
       isWelcomeAnimationVisible ||
       !isDefined(accessToken) ||
+      !isDefined(tourStateRevision) ||
       autoStartEligibleTokenRef.current !== accessToken
     ) {
       return;
     }
 
     autoStartEligibleTokenRef.current = undefined;
+    autoStartEligibleRevisionRef.current = undefined;
     setIsAutoStartEligible(false);
-    startTour(accessToken);
+    startTour(accessToken, tourStateRevision);
   }, [
     accessToken,
     isAutoStartEligible,
@@ -236,21 +248,29 @@ export const AnansiTourOverlay = () => {
   // ANANSI PATCH (WS-C): a successful Profile reset starts immediately rather
   // than waiting for another eligibility GET or application remount.
   useEffect(() => {
-    if (
-      !isTourRequested ||
-      !isLogged ||
-      onboardingStatus !== OnboardingStatus.COMPLETED ||
-      !isDefined(accessToken)
-    ) {
+    if (!isDefined(requestedTour)) {
       return;
     }
 
-    setIsTourRequested(false);
-    startTour(accessToken);
+    if (
+      !isLogged ||
+      onboardingStatus !== OnboardingStatus.COMPLETED ||
+      !isDefined(accessToken) ||
+      requestedTour.accessToken !== accessToken
+    ) {
+      setIsTourRequested(null);
+      return;
+    }
+
+    setIsTourRequested(null);
+    startTour(
+      requestedTour.accessToken,
+      requestedTour.tourStateRevision,
+    );
   }, [
     accessToken,
     isLogged,
-    isTourRequested,
+    requestedTour,
     onboardingStatus,
     setIsTourRequested,
     startTour,
@@ -258,22 +278,26 @@ export const AnansiTourOverlay = () => {
 
   const closeAndMarkSeen = useCallback(() => {
     const tourToken = activeTourTokenRef.current;
+    const tourStateRevision = activeTourRevisionRef.current;
     activeTourTokenRef.current = undefined;
+    activeTourRevisionRef.current = undefined;
     setIsActive(false);
     setAnchorElement(null);
     setAnchorRect(null);
 
-    if (!isDefined(tourToken)) {
+    if (!isDefined(tourToken) || !isDefined(tourStateRevision)) {
       return;
     }
 
     // ANANSI PATCH (WS-C): persistence must never hold the overlay open. The
-    // shared writer preserves close-before-restart ordering, and the captured
-    // tour token prevents an account switch from writing the next user's state.
-    void patchAnansiTourSeen(tourToken, true).catch((error: unknown) => {
-      // oxlint-disable-next-line no-console
-      console.error('ANANSI: could not mark guided tour seen', error);
-    });
+    // captured token and start revision prevent an account switch or a delayed
+    // close from overwriting a newer restart.
+    void patchAnansiTourSeen(tourToken, true, tourStateRevision).catch(
+      (error: unknown) => {
+        // oxlint-disable-next-line no-console
+        console.error('ANANSI: could not mark guided tour seen', error);
+      },
+    );
   }, []);
 
   // ANANSI PATCH (WS-C): navigate first, then poll the live document for up to

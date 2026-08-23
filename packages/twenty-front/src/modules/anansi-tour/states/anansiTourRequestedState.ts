@@ -1,8 +1,15 @@
-// ANANSI PATCH (WS-C): Profile requests a restart through shared Jotai state so
-// the root-mounted overlay can start without a window event or remount.
+// ANANSI PATCH (WS-C): Profile passes the persisted restart revision and its
+// access token through shared Jotai state so the root-mounted overlay can bind
+// the new tour instance to the user and Core state that created it.
 import { createAtomState } from '@/ui/utilities/state/jotai/utils/createAtomState';
 
-export const anansiTourRequestedState = createAtomState<boolean>({
-  key: 'anansiTourRequestedState',
-  defaultValue: false,
-});
+type AnansiTourRequest = {
+  accessToken: string;
+  tourStateRevision: number;
+};
+
+export const anansiTourRequestedState =
+  createAtomState<AnansiTourRequest | null>({
+    key: 'anansiTourRequestedState',
+    defaultValue: null,
+  });
