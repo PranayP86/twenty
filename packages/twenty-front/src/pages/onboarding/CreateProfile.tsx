@@ -73,7 +73,6 @@ const validationSchema = z.object({
   lastName: z.string().min(1, {
     error: i18n._(lastNameErrorMessage),
   }),
-  jobTitle: z.string(),
 });
 
 type Form = z.infer<typeof validationSchema>;
@@ -103,7 +102,6 @@ export const CreateProfile = () => {
     defaultValues: {
       firstName: currentWorkspaceMember?.name?.firstName ?? '',
       lastName: currentWorkspaceMember?.name?.lastName ?? '',
-      jobTitle: currentWorkspaceMember?.jobTitle ?? '',
     },
     resolver: zodResolver(validationSchema),
   });
@@ -125,7 +123,6 @@ export const CreateProfile = () => {
               firstName: data.firstName,
               lastName: data.lastName,
             },
-            jobTitle: data.jobTitle,
             colorScheme: 'System',
           },
         });
@@ -139,7 +136,6 @@ export const CreateProfile = () => {
                     firstName: data.firstName,
                     lastName: data.lastName,
                   },
-                  jobTitle: data.jobTitle,
                   colorScheme: 'System',
                 }
               : member,
@@ -262,24 +258,8 @@ export const CreateProfile = () => {
               />
             </StyledNameField>
           </StyledNameRow>
-          <Controller
-            name="jobTitle"
-            control={control}
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                label={t`Job Title`}
-                value={value}
-                onFocus={() => setIsEditingMode(true)}
-                onBlur={() => {
-                  onBlur();
-                  setIsEditingMode(false);
-                }}
-                onChange={onChange}
-                placeholder={t`Head of Partnerships`}
-                fullWidth
-              />
-            )}
-          />
+          {/* ANANSI PATCH: desired roles belong to the later multi-role wizard
+              step; asking for one job title here duplicates that input. */}
         </StyledForm>
       </OnboardingStepAnimatedItem>
 

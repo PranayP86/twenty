@@ -58,4 +58,4 @@ jobs:
           # ANANSI PATCH (WS-C): exact wizard, layout, and guided-tour specs keep
           # the focused front gate from silently skipping Tasks 9 and 10.
           npx jest --config packages/twenty-front/jest.config.mjs --ci --runInBand \
-            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|AnansiWizard\.test\.tsx|AnansiTourOverlay\.test\.tsx|OnboardingStepLayout\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"
+            "AnansiProvisioningScreen\.test\.tsx|AnansiProfilePage\.test\.tsx|AnansiWizard\.test\.tsx|AnansiTourOverlay\.test\.tsx|CreateProfile\.anansi\.test\.tsx|OnboardingStepLayout\.test\.tsx|SignInUpWorkspaceCreationForm\.test\.tsx"
