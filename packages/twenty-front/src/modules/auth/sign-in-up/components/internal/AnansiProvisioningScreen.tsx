@@ -7,6 +7,8 @@
 import { ANANSI_API_URL } from '@/auth/constants/AnansiApiUrl';
 import { SubTitle } from '@/auth/components/SubTitle';
 import { Title } from '@/auth/components/Title';
+import { renewToken } from '@/auth/services/AuthService';
+import { useSignInWithGoogle } from '@/auth/sign-in-up/hooks/useSignInWithGoogle';
 import { currentUserState } from '@/auth/states/currentUserState';
 import { isCreatingWorkspaceState } from '@/auth/states/isCreatingWorkspaceState';
 import { isMultiWorkspaceEnabledState } from '@/client-config/states/isMultiWorkspaceEnabledState';
@@ -14,7 +16,7 @@ import { useRedirectToWorkspaceDomain } from '@/domain-manager/hooks/useRedirect
 import { OnboardingModalCircularIcon } from '@/onboarding/components/OnboardingModalCircularIcon';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
-import { useMutation } from '@apollo/client/react';
+import { useApolloClient, useMutation } from '@apollo/client/react';
 import { styled } from '@linaria/react';
 import { useLingui } from '@lingui/react/macro';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,7 +29,9 @@ import { AnimatedEaseIn } from 'twenty-ui/layout';
 import { themeCssVariables } from 'twenty-ui/theme-constants';
 import {
   ActivateWorkspaceDocument,
+  type AuthTokenPair,
   GetAuthTokensFromLoginTokenDocument,
+  GetCurrentUserDocument,
   SignUpInNewWorkspaceDocument,
 } from '~/generated-metadata/graphql';
 import { getWorkspaceUrl } from '~/utils/getWorkspaceUrl';
@@ -70,6 +74,14 @@ type ProvisioningPhase =
   | 'requestSent'
   | 'error'
   | 'provisionError';
+
+type ProvisioningRetryContext = {
+  loginToken: string;
+  loginTokenExpiresAt?: string;
+  tokenPair?: AuthTokenPair;
+  workspaceId: string;
+  workspaceUrl: string;
+};
 
 // Workspace name = email local-part, capitalized. Dumb and predictable on
 // purpose (e.g. jane.doe@gmail.com -> "Jane.doe") — there is no form for the
@@ -139,6 +151,8 @@ export const AnansiProvisioningScreen = () => {
   );
   const setIsCreatingWorkspace = useSetAtomState(isCreatingWorkspaceState);
   const { redirectToWorkspaceDomain } = useRedirectToWorkspaceDomain();
+  const { signInWithGoogle } = useSignInWithGoogle();
+  const apolloClient = useApolloClient();
 
   const [signUpInNewWorkspaceMutation] = useMutation(
     SignUpInNewWorkspaceDocument,
@@ -147,6 +161,142 @@ export const AnansiProvisioningScreen = () => {
     GetAuthTokensFromLoginTokenDocument,
   );
   const [activateWorkspaceMutation] = useMutation(ActivateWorkspaceDocument);
+
+  const exchangeLoginToken = useCallback(
+    async ({
+      loginToken,
+      workspaceUrl,
+    }: ProvisioningRetryContext): Promise<AuthTokenPair | undefined> => {
+      try {
+        const { data } = await getAuthTokensFromLoginTokenMutation({
+          variables: {
+            loginToken,
+            origin: workspaceUrl,
+          },
+        });
+
+        return data?.getAuthTokensFromLoginToken.tokens;
+      } catch (error) {
+        // oxlint-disable-next-line no-console
+        console.error(
+          'ANANSI: could not exchange login token for provisioning',
+          error,
+        );
+        return undefined;
+      }
+    },
+    [getAuthTokensFromLoginTokenMutation],
+  );
+
+  const getFreshLoginToken = useCallback(
+    async (
+      retryContext: ProvisioningRetryContext,
+    ): Promise<string | undefined> => {
+      const accessToken =
+        retryContext.tokenPair?.accessOrWorkspaceAgnosticToken.token;
+
+      if (!isDefined(accessToken)) {
+        return undefined;
+      }
+
+      try {
+        const { data } = await apolloClient.query({
+          query: GetCurrentUserDocument,
+          fetchPolicy: 'network-only',
+          context: {
+            skipAuthToken: true,
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+            },
+          },
+        });
+        const matchingWorkspace =
+          data?.currentUser?.availableWorkspaces.availableWorkspacesForSignIn.find(
+            (workspace) => workspace.id === retryContext.workspaceId,
+          );
+
+        if (!isDefined(matchingWorkspace?.loginToken)) {
+          return undefined;
+        }
+
+        retryContext.loginToken = matchingWorkspace.loginToken;
+        retryContext.loginTokenExpiresAt = undefined;
+        return matchingWorkspace.loginToken;
+      } catch (error) {
+        // oxlint-disable-next-line no-console
+        console.error(
+          'ANANSI: could not refresh login token for provisioning',
+          error,
+        );
+        return undefined;
+      }
+    },
+    [apolloClient],
+  );
+
+  const getCurrentTokenPair = useCallback(
+    async (
+      retryContext: ProvisioningRetryContext,
+    ): Promise<AuthTokenPair | undefined> => {
+      const loginTokenIsExpired =
+        isDefined(retryContext.loginTokenExpiresAt) &&
+        Date.parse(retryContext.loginTokenExpiresAt) <= Date.now();
+      const tokenPair = loginTokenIsExpired
+        ? undefined
+        : await exchangeLoginToken(retryContext);
+
+      if (isDefined(tokenPair)) {
+        retryContext.tokenPair = tokenPair;
+        return tokenPair;
+      }
+
+      if (!isDefined(retryContext.tokenPair)) {
+        if (loginTokenIsExpired) {
+          signInWithGoogle({ action: 'list-available-workspaces' });
+        }
+
+        return undefined;
+      }
+
+      let freshLoginToken = await getFreshLoginToken(retryContext);
+
+      if (!isDefined(freshLoginToken)) {
+        try {
+          const renewedTokenPair = await renewToken(
+            `${retryContext.workspaceUrl}/metadata`,
+            retryContext.tokenPair,
+          );
+
+          if (!isDefined(renewedTokenPair)) {
+            return undefined;
+          }
+
+          retryContext.tokenPair = renewedTokenPair;
+          freshLoginToken = await getFreshLoginToken(retryContext);
+        } catch (error) {
+          // oxlint-disable-next-line no-console
+          console.error(
+            'ANANSI: could not renew workspace token for provisioning',
+            error,
+          );
+          return undefined;
+        }
+      }
+
+      if (!isDefined(freshLoginToken)) {
+        return undefined;
+      }
+
+      const refreshedTokenPair = await exchangeLoginToken(retryContext);
+
+      if (isDefined(refreshedTokenPair)) {
+        retryContext.tokenPair = refreshedTokenPair;
+      }
+
+      return refreshedTokenPair;
+    },
+    [exchangeLoginToken, getFreshLoginToken, signInWithGoogle],
+  );
 
   const activateNewWorkspace = useCallback(
     async (accessToken: string): Promise<boolean> => {
@@ -176,16 +326,11 @@ export const AnansiProvisioningScreen = () => {
 
   const [phase, setPhase] = useState<ProvisioningPhase>('creating');
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
-  // ANANSI PATCH (WS-B): provision failures block + retry — the workspace
-  // and login token already exist by the time provisioning can fail, so a
-  // manual retry only needs to re-call provision, not redo signup. Kept in
-  // a ref (not state) since it's write-once-per-attempt-cycle context, not
-  // something a render should react to.
-  const provisionRetryContextRef = useRef<{
-    accessToken: string;
-    workspaceUrl: string;
-    loginToken: string;
-  } | null>(null);
+  // ANANSI PATCH (WS-C): save workspace identity before token exchange. A
+  // failed exchange must retry this workspace, never create another one.
+  const provisionRetryContextRef = useRef<ProvisioningRetryContext | null>(
+    null,
+  );
   const [isRetryingProvision, setIsRetryingProvision] = useState(false);
   const hasStartedRef = useRef(false);
   const isMountedRef = useRef(true);
@@ -227,46 +372,31 @@ export const AnansiProvisioningScreen = () => {
         const { workspace, loginToken } = data.signUpInNewWorkspace;
         const workspaceUrl = getWorkspaceUrl(workspace.workspaceUrls);
 
-        let accessToken: string | undefined;
-
         if (isMultiWorkspaceEnabled) {
-          // The stock redirect below is a full cross-origin navigation to
-          // the new workspace's own subdomain, where the login token would
-          // normally get exchanged for real auth tokens (useVerifyLogin on
-          // the Verify page). We need that access token *before* we
-          // navigate away (to provision with it), so we exchange it here
-          // ourselves first — passing the new workspace's own URL as
-          // origin (not window.location.origin, which is still the
-          // default domain at this point) so the server resolves the
-          // workspace the token was actually issued for. The login token
-          // is a signed JWT, not single-use, so the Verify page's own
-          // exchange after the redirect is unaffected.
-          try {
-            const { data: tokenData } =
-              await getAuthTokensFromLoginTokenMutation({
-                variables: {
-                  loginToken: loginToken.token,
-                  origin: workspaceUrl,
-                },
-              });
-            accessToken =
-              tokenData?.getAuthTokensFromLoginToken.tokens
-                .accessOrWorkspaceAgnosticToken.token;
-          } catch (tokenError) {
-            // oxlint-disable-next-line no-console
-            console.error(
-              'ANANSI: could not exchange login token for provisioning',
-              tokenError,
-            );
-          }
-        }
-
-        if (isDefined(accessToken)) {
-          provisionRetryContextRef.current = {
-            accessToken,
-            workspaceUrl,
+          // ANANSI PATCH (WS-C): save the created workspace before exchanging
+          // its reusable login token. Exchange failure must block entry and
+          // retry this same workspace instead of falling through or signing up
+          // again.
+          const retryContext: ProvisioningRetryContext = {
             loginToken: loginToken.token,
+            loginTokenExpiresAt: loginToken.expiresAt,
+            workspaceId: workspace.id,
+            workspaceUrl,
           };
+          provisionRetryContextRef.current = retryContext;
+
+          const tokenPair = await getCurrentTokenPair(retryContext);
+
+          if (!isDefined(tokenPair)) {
+            if (isMountedRef.current) {
+              setIsCreatingWorkspace(false);
+              setPhase('provisionError');
+            }
+            return;
+          }
+
+          retryContext.tokenPair = tokenPair;
+          const accessToken = tokenPair.accessOrWorkspaceAgnosticToken.token;
 
           const isActivated = await activateNewWorkspace(accessToken);
 
@@ -295,11 +425,6 @@ export const AnansiProvisioningScreen = () => {
             setPhase('provisionError');
             return;
           }
-        } else {
-          // oxlint-disable-next-line no-console
-          console.error(
-            'ANANSI: no access token available for provisioning; core will re-provision on next check',
-          );
         }
 
         if (isMultiWorkspaceEnabled) {
@@ -340,7 +465,7 @@ export const AnansiProvisioningScreen = () => {
   }, [
     activateNewWorkspace,
     currentUser?.email,
-    getAuthTokensFromLoginTokenMutation,
+    getCurrentTokenPair,
     isMultiWorkspaceEnabled,
     redirectToWorkspaceDomain,
     setIsCreatingWorkspace,
@@ -364,7 +489,18 @@ export const AnansiProvisioningScreen = () => {
 
     setIsRetryingProvision(true);
 
-    const isActivated = await activateNewWorkspace(retryContext.accessToken);
+    const tokenPair = await getCurrentTokenPair(retryContext);
+
+    if (!isDefined(tokenPair)) {
+      if (isMountedRef.current) {
+        setIsRetryingProvision(false);
+      }
+      return;
+    }
+
+    retryContext.tokenPair = tokenPair;
+    const accessToken = tokenPair.accessOrWorkspaceAgnosticToken.token;
+    const isActivated = await activateNewWorkspace(accessToken);
 
     if (!isActivated) {
       if (isMountedRef.current) {
@@ -373,7 +509,7 @@ export const AnansiProvisioningScreen = () => {
       return;
     }
 
-    const isProvisioned = await provisionWorkspace(retryContext.accessToken);
+    const isProvisioned = await provisionWorkspace(accessToken);
 
     if (!isMountedRef.current) {
       return;
