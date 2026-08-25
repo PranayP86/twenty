@@ -4,6 +4,7 @@
 export type AnansiTourStep = {
   selector: string;
   route?: string;
+  routeSelector?: string;
   title: string;
   body: string;
 };
@@ -11,13 +12,13 @@ export type AnansiTourStep = {
 export const ANANSI_TOUR_STEPS: AnansiTourStep[] = [
   {
     selector: '[id^="nav-item-anansi"]',
-    route: '/',
+    routeSelector: '[id^="nav-item-anansi"]',
     title: 'Your dashboard',
     body: 'Everything that needs your attention lands here first.',
   },
   {
     selector: '[data-anansi-tour="widget-card"]',
-    route: '/',
+    routeSelector: '[id^="nav-item-anansi"]',
     title: 'Live cards',
     body: 'Each card is live: pipeline, activity, sends, and the tasks waiting on you.',
   },

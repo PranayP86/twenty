@@ -272,10 +272,7 @@ export const AnansiTourOverlay = () => {
     autoStartEligibleRevisionRef.current = undefined;
     setIsAutoStartEligible(false);
     setIsTourRequested(null);
-    startTour(
-      requestedTour.accessToken,
-      requestedTour.tourStateRevision,
-    );
+    startTour(requestedTour.accessToken, requestedTour.tourStateRevision);
   }, [
     accessToken,
     isLogged,
@@ -327,19 +324,46 @@ export const AnansiTourOverlay = () => {
     setAnchorRect(null);
     setIsVisible(false);
 
-    if (
-      isDefined(step.route) &&
-      currentTourRouteRef.current !== step.route
-    ) {
-      currentTourRouteRef.current = step.route;
-      if (location.pathname !== step.route) {
-        navigate(step.route);
+    const resolveStepRoute = () =>
+      isDefined(step.routeSelector)
+        ? (document
+            .querySelector<HTMLElement>(step.routeSelector)
+            ?.getAttribute('href') ?? undefined)
+        : step.route;
+
+    const navigateToStepRoute = (route: string) => {
+      if (currentTourRouteRef.current === route) {
+        return false;
       }
+
+      currentTourRouteRef.current = route;
+      if (location.pathname === route) {
+        return false;
+      }
+
+      navigate(route);
+      return true;
+    };
+
+    const initialResolvedRoute = resolveStepRoute();
+    if (
+      isDefined(initialResolvedRoute) &&
+      navigateToStepRoute(initialResolvedRoute)
+    ) {
+      return;
     }
 
     let animationFrameId = 0;
     let firstFrameTime: number | undefined;
     let isCancelled = false;
+
+    const skipMissingStep = () => {
+      if (stepIndex === ANANSI_TOUR_STEPS.length - 1) {
+        closeAndMarkSeen();
+      } else {
+        setStepIndex((current) => current + 1);
+      }
+    };
 
     const findAnchor = (frameTime: number) => {
       if (isCancelled) {
@@ -347,6 +371,21 @@ export const AnansiTourOverlay = () => {
       }
 
       firstFrameTime ??= frameTime;
+
+      const resolvedRoute = resolveStepRoute();
+      if (isDefined(step.routeSelector) && !isDefined(resolvedRoute)) {
+        if (frameTime - firstFrameTime >= ANCHOR_TIMEOUT_MS) {
+          skipMissingStep();
+        } else {
+          animationFrameId = requestAnimationFrame(findAnchor);
+        }
+        return;
+      }
+
+      if (isDefined(resolvedRoute) && navigateToStepRoute(resolvedRoute)) {
+        return;
+      }
+
       const element = document.querySelector<HTMLElement>(step.selector);
 
       if (isDefined(element)) {
@@ -357,11 +396,7 @@ export const AnansiTourOverlay = () => {
       }
 
       if (frameTime - firstFrameTime >= ANCHOR_TIMEOUT_MS) {
-        if (stepIndex === ANANSI_TOUR_STEPS.length - 1) {
-          closeAndMarkSeen();
-        } else {
-          setStepIndex((current) => current + 1);
-        }
+        skipMissingStep();
         return;
       }
 
@@ -420,9 +455,7 @@ export const AnansiTourOverlay = () => {
   const popoverTop = clamp(
     anchorRect.bottom + POPOVER_GAP_PX,
     VIEWPORT_MARGIN_PX,
-    window.innerHeight -
-      POPOVER_ESTIMATED_HEIGHT_PX -
-      VIEWPORT_MARGIN_PX,
+    window.innerHeight - POPOVER_ESTIMATED_HEIGHT_PX - VIEWPORT_MARGIN_PX,
   );
 
   const highlightStyle: CSSProperties = {

@@ -7,23 +7,16 @@ import { useApolloFactory } from '@/apollo/hooks/useApolloFactory';
 
 enableFetchMocks();
 
+jest.mock('@/auth/constants/AnansiHomeUrl', () => ({
+  ANANSI_HOME_URL: '#anansi-home',
+}));
+
 jest.mock('@/apollo/utils/getTokenPair', () => ({
   getTokenPair: jest.fn().mockReturnValue({
     accessOrWorkspaceAgnosticToken: { token: 'testAccessToken', expiresAt: '' },
     refreshToken: { token: 'testRefreshToken', expiresAt: '' },
   }),
 }));
-
-const mockNavigate = jest.fn();
-
-jest.mock('react-router-dom', () => {
-  const initialRouter = jest.requireActual('react-router-dom');
-
-  return {
-    ...initialRouter,
-    useNavigate: () => mockNavigate,
-  };
-});
 
 const Wrapper = ({ children }: { children: React.ReactNode }) => (
   <MemoryRouter
@@ -52,7 +45,7 @@ describe('useApolloFactory', () => {
     expect(res).toHaveProperty('query');
   });
 
-  it('should navigate to /welcome on unauthenticated error', async () => {
+  it('should redirect to Anansi home on unauthenticated error', async () => {
     const errors = [
       {
         extensions: {
@@ -81,9 +74,9 @@ describe('useApolloFactory', () => {
 
     expect(result.current.location.pathname).toBe('/opportunities');
 
-    try {
-      await act(async () => {
-        await result.current.factory.mutate({
+    await act(async () => {
+      await expect(
+        result.current.factory.mutate({
           mutation: gql`
             mutation Track($type: String!, $sessionId: String!, $data: JSON!) {
               track(type: $type, sessionId: $sessionId, data: $data) {
@@ -91,13 +84,10 @@ describe('useApolloFactory', () => {
               }
             }
           `,
-        });
-      });
-    } catch (error) {
-      expect(error).toBeDefined();
+        }),
+      ).rejects.toBeDefined();
+    });
 
-      expect(mockNavigate).toHaveBeenCalled();
-      expect(mockNavigate).toHaveBeenCalledWith('/welcome');
-    }
+    expect(window.location.hash).toBe('#anansi-home');
   });
 });

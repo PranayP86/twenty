@@ -187,18 +187,18 @@ describe('useSetNextOnboardingStatus', () => {
     expect(shouldOpenAiChatAfterOnboarding).toBe(false);
   });
 
-  it('should invite the team right after profile creation', () => {
+  it('should start the Anansi wizard right after profile creation', () => {
     const {
       nextOnboardingStatus,
       isWelcomeAnimationVisible,
       shouldOpenAiChatAfterOnboarding,
     } = renderHooks(OnboardingStatus.PROFILE_CREATION);
-    expect(nextOnboardingStatus).toEqual(OnboardingStatus.INVITE_TEAM);
+    expect(nextOnboardingStatus).toEqual(OnboardingStatus.ANANSI_WIZARD);
     expect(isWelcomeAnimationVisible).toBe(false);
     expect(shouldOpenAiChatAfterOnboarding).toBe(false);
   });
 
-  it('should complete after profile creation when more than 1 workspaceMember exist', () => {
+  it('should start the Anansi wizard after profile creation when more than 1 workspaceMember exist', () => {
     const {
       nextOnboardingStatus,
       isWelcomeAnimationVisible,
@@ -206,12 +206,12 @@ describe('useSetNextOnboardingStatus', () => {
     } = renderHooks(OnboardingStatus.PROFILE_CREATION, {
       withOneWorkspaceMember: false,
     });
-    expect(nextOnboardingStatus).toEqual(OnboardingStatus.COMPLETED);
-    expect(isWelcomeAnimationVisible).toBe(true);
+    expect(nextOnboardingStatus).toEqual(OnboardingStatus.ANANSI_WIZARD);
+    expect(isWelcomeAnimationVisible).toBe(false);
     expect(shouldOpenAiChatAfterOnboarding).toBe(false);
   });
 
-  it('should require a plan after profile creation when billing is enabled and the workspace has no subscription', () => {
+  it('should start the Anansi wizard before billing after profile creation', () => {
     const {
       nextOnboardingStatus,
       isWelcomeAnimationVisible,
@@ -221,7 +221,7 @@ describe('useSetNextOnboardingStatus', () => {
       isBillingEnabled: true,
       withSubscription: false,
     });
-    expect(nextOnboardingStatus).toEqual(OnboardingStatus.PLAN_REQUIRED);
+    expect(nextOnboardingStatus).toEqual(OnboardingStatus.ANANSI_WIZARD);
     expect(isWelcomeAnimationVisible).toBe(false);
     expect(shouldOpenAiChatAfterOnboarding).toBe(false);
   });
@@ -280,7 +280,7 @@ describe('useSetNextOnboardingStatus', () => {
     expect(shouldOpenAiChatAfterOnboarding).toBe(false);
   });
 
-  it('should book a call after profile creation when more than 1 workspaceMember exist', () => {
+  it('should start the Anansi wizard before booking a call after profile creation', () => {
     const { nextOnboardingStatus } = renderHooks(
       OnboardingStatus.PROFILE_CREATION,
       {
@@ -290,7 +290,7 @@ describe('useSetNextOnboardingStatus', () => {
         isBookCallOnboardingStepPending: true,
       },
     );
-    expect(nextOnboardingStatus).toEqual(OnboardingStatus.BOOK_CALL);
+    expect(nextOnboardingStatus).toEqual(OnboardingStatus.ANANSI_WIZARD);
   });
 
   it('should skip the book-call step once the workspace has a subscription, matching the server', () => {
