@@ -332,15 +332,19 @@ describe('AnansiWizard', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('checks Profile after an ambiguous provisioning response', async () => {
+  it('shows and repairs a provisioning failure after Profile recovers', async () => {
     const calls: string[] = [];
     mockFetchRouter(
       {
         'GET /v1/profile': [
           jsonError(401, { detail: 'unauthenticated' }),
           jsonOk(profileResponse()),
+          jsonOk(profileResponse()),
         ],
-        'POST /v1/provision': [jsonError(503)],
+        'POST /v1/provision': [
+          jsonError(503),
+          jsonOk({ status: 'provisioned' }),
+        ],
       },
       (key) => calls.push(key),
     );
@@ -348,11 +352,196 @@ describe('AnansiWizard', () => {
     renderWizard();
 
     expect(await screen.findByText('Add your resume')).toBeInTheDocument();
-    expect(calls).toEqual([
-      'GET /v1/profile',
-      'POST /v1/provision',
-      'GET /v1/profile',
-    ]);
+    expect(
+      await screen.findByText(
+        "Couldn't finish setting up your workspace. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry workspace setup' }),
+    );
+    await waitFor(() =>
+      expect(calls).toEqual([
+        'GET /v1/profile',
+        'POST /v1/provision',
+        'GET /v1/profile',
+        'POST /v1/provision',
+        'GET /v1/profile',
+      ]),
+    );
+    expect(
+      screen.queryByText(
+        "Couldn't finish setting up your workspace. Please try again.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reloads Profile after retrying a failed workspace repair', async () => {
+    const calls: string[] = [];
+    mockFetchRouter(
+      {
+        'GET /v1/profile': [
+          jsonError(401, { detail: 'unauthenticated' }),
+          jsonError(500),
+          jsonOk(profileResponse()),
+        ],
+        'POST /v1/provision': [
+          jsonError(503),
+          jsonOk({ status: 'provisioned' }),
+        ],
+      },
+      (key) => calls.push(key),
+    );
+
+    renderWizard();
+
+    expect(
+      await screen.findByText(
+        "Couldn't finish setting up your workspace. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Couldn't load your saved onboarding progress. Please try again.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry workspace setup' }),
+    );
+
+    await waitFor(() =>
+      expect(calls).toEqual([
+        'GET /v1/profile',
+        'POST /v1/provision',
+        'GET /v1/profile',
+        'POST /v1/provision',
+        'GET /v1/profile',
+      ]),
+    );
+    expect(
+      screen.queryByText(
+        "Couldn't load your saved onboarding progress. Please try again.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reloads Profile while a manual provisioning retry is still pending', async () => {
+    let profileReads = 0;
+    let provisionCalls = 0;
+    let resolveProvision:
+      | ((response: ReturnType<typeof jsonOk>) => void)
+      | undefined;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const path = String(input).replace(ANANSI_API_URL, '');
+      const key = `${method} ${path}`;
+
+      if (key === 'GET /v1/profile') {
+        profileReads += 1;
+        if (profileReads === 1) {
+          return Promise.resolve(jsonError(401, { detail: 'unauthenticated' }));
+        }
+        return Promise.resolve(
+          profileReads === 2 ? jsonError(500) : jsonOk(profileResponse()),
+        );
+      }
+
+      if (key === 'POST /v1/provision') {
+        provisionCalls += 1;
+        if (provisionCalls === 1) {
+          return Promise.resolve(jsonError(503));
+        }
+        return new Promise<ReturnType<typeof jsonOk>>((resolve) => {
+          resolveProvision = resolve;
+        });
+      }
+
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }) as unknown as typeof fetch;
+
+    renderWizard();
+
+    const retryButton = await screen.findByRole('button', {
+      name: 'Retry workspace setup',
+    });
+    expect(
+      await screen.findByText(
+        "Couldn't load your saved onboarding progress. Please try again.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(profileReads).toBe(3));
+    expect(provisionCalls).toBe(2);
+    expect(
+      screen.queryByText(
+        "Couldn't load your saved onboarding progress. Please try again.",
+      ),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveProvision?.(jsonOk({ status: 'provisioned' }));
+      await Promise.resolve();
+    });
+  });
+
+  it('ignores an older provisioning failure after a newer repair succeeds', async () => {
+    let profileReads = 0;
+    let provisionCalls = 0;
+    let rejectOlderRepair: ((reason?: unknown) => void) | undefined;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const path = String(input).replace(ANANSI_API_URL, '');
+      const key = `${method} ${path}`;
+
+      if (key === 'GET /v1/profile') {
+        profileReads += 1;
+        return Promise.resolve(
+          profileReads === 1
+            ? jsonError(401, { detail: 'unauthenticated' })
+            : jsonOk(profileResponse()),
+        );
+      }
+
+      if (key === 'POST /v1/provision') {
+        provisionCalls += 1;
+        if (provisionCalls === 1) {
+          return Promise.resolve(jsonError(503));
+        }
+        if (provisionCalls === 2) {
+          return new Promise<ReturnType<typeof jsonOk>>((_, reject) => {
+            rejectOlderRepair = reject;
+          });
+        }
+        return Promise.resolve(jsonOk({ status: 'provisioned' }));
+      }
+
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }) as unknown as typeof fetch;
+
+    renderWizard();
+
+    const retryButton = await screen.findByRole('button', {
+      name: 'Retry workspace setup',
+    });
+    act(() => {
+      fireEvent.click(retryButton);
+      fireEvent.click(retryButton);
+    });
+    await waitFor(() => expect(provisionCalls).toBe(3));
+
+    await act(async () => {
+      rejectOlderRepair?.(new Error('older repair failed'));
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByText(
+        "Couldn't finish setting up your workspace. Please try again.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('checks Profile while a provisioning response is still pending', async () => {
@@ -398,6 +587,55 @@ describe('AnansiWizard', () => {
       resolveProvision?.(jsonOk({ status: 'provisioned' }));
       await Promise.resolve();
     });
+  });
+
+  it('keeps checking Profile through the provisioning request deadline', async () => {
+    jest.useFakeTimers();
+    let profileReads = 0;
+    let provisionAborted = false;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const path = String(input).replace(ANANSI_API_URL, '');
+      const key = `${method} ${path}`;
+
+      if (key === 'GET /v1/profile') {
+        profileReads += 1;
+        return Promise.resolve(
+          profileReads === 62
+            ? jsonOk(profileResponse())
+            : jsonError(401, { detail: 'unauthenticated' }),
+        );
+      }
+
+      if (key === 'POST /v1/provision') {
+        return new Promise<ReturnType<typeof jsonOk>>((_, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => {
+              provisionAborted = true;
+              reject(new Error('aborted'));
+            },
+            { once: true },
+          );
+        });
+      }
+
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }) as unknown as typeof fetch;
+
+    renderWizard();
+    await waitFor(() => expect(profileReads).toBe(2));
+
+    for (let poll = 0; poll < 60; poll += 1) {
+      await act(async () => {
+        jest.advanceTimersByTime(1_500);
+        await Promise.resolve();
+      });
+    }
+
+    expect(provisionAborted).toBe(true);
+    expect(profileReads).toBe(62);
+    expect(await screen.findByLabelText('PDF resume')).toBeEnabled();
   });
 
   it('aborts a pending provisioning response after Profile recovers', async () => {

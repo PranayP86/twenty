@@ -324,6 +324,8 @@ const RESUME_PARSE_TIMEOUT_DETAIL =
   'Resume extraction is taking longer than expected. Select the PDF again to retry.';
 const RESUME_CAPACITY_FULL_DETAIL =
   'resume upload capacity is full; try again later';
+const PROVISION_FAILED_DETAIL =
+  "Couldn't finish setting up your workspace. Please try again.";
 const resumeUploadMayStillBeRunning = (error: unknown) =>
   !(error instanceof AnansiApiError) ||
   error.status === 409 ||
@@ -356,6 +358,7 @@ export const AnansiWizard = () => {
   const [stepIndex, setStepIndex] = useState(0);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [provisionErrorMessage, setProvisionErrorMessage] = useState<string>();
   const [isUploading, setIsUploading] = useState(false);
   const [resumeUploadFailed, setResumeUploadFailed] = useState(false);
   const [resumeReady, setResumeReady] = useState(false);
@@ -402,6 +405,10 @@ export const AnansiWizard = () => {
   );
   // oxlint-disable-next-line twenty/no-state-useref
   const profileRequestRef = useRef(0);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const provisionRequestRef = useRef(0);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const provisionInFlightRef = useRef(false);
   // oxlint-disable-next-line twenty/no-state-useref
   const finishRequestRef = useRef(0);
   // oxlint-disable-next-line twenty/no-state-useref
@@ -469,6 +476,33 @@ export const AnansiWizard = () => {
     [],
   );
 
+  const repairProvisioning = useCallback(async () => {
+    if (!isDefined(accessToken) || !isDefined(sessionIdentity)) {
+      return;
+    }
+
+    const requestId = provisionRequestRef.current + 1;
+    provisionRequestRef.current = requestId;
+    provisionInFlightRef.current = true;
+    const requestSessionIdentity = sessionIdentity;
+    const isCurrentRequest = () =>
+      isMountedRef.current &&
+      currentSessionIdentityRef.current === requestSessionIdentity &&
+      provisionRequestRef.current === requestId;
+    setProvisionErrorMessage(undefined);
+    try {
+      await provisionAnansiWorkspace(accessToken);
+    } catch {
+      if (isCurrentRequest()) {
+        setProvisionErrorMessage(PROVISION_FAILED_DETAIL);
+      }
+    } finally {
+      if (isCurrentRequest()) {
+        provisionInFlightRef.current = false;
+      }
+    }
+  }, [accessToken, sessionIdentity]);
+
   const loadProfile = useCallback(async () => {
     if (!isDefined(accessToken)) {
       return;
@@ -503,7 +537,9 @@ export const AnansiWizard = () => {
         // that idempotent repair, but do not keep the wizard behind its slower
         // view/dashboard bootstrap. The Core user commits first, so Profile can
         // prove readiness while the remaining repair finishes in the background.
-        void provisionAnansiWorkspace(accessToken).catch(() => undefined);
+        if (!provisionInFlightRef.current) {
+          void repairProvisioning();
+        }
 
         for (let attempt = 0; ; attempt += 1) {
           if (!isCurrentRequest()) {
@@ -516,7 +552,7 @@ export const AnansiWizard = () => {
             if (
               !(profileError instanceof AnansiApiError) ||
               profileError.status !== 401 ||
-              attempt >= 59
+              attempt >= 60
             ) {
               throw profileError;
             }
@@ -545,7 +581,12 @@ export const AnansiWizard = () => {
         setIsLoadingProfile(false);
       }
     }
-  }, [accessToken, applyProfile]);
+  }, [accessToken, applyProfile, repairProvisioning]);
+
+  const retryProvisioning = useCallback(() => {
+    void repairProvisioning();
+    void loadProfile();
+  }, [loadProfile, repairProvisioning]);
 
   useEffect(() => {
     void loadProfile();
@@ -661,6 +702,8 @@ export const AnansiWizard = () => {
     return () => {
       isMountedRef.current = false;
       profileRequestRef.current += 1;
+      provisionRequestRef.current += 1;
+      provisionInFlightRef.current = false;
       finishRequestRef.current += 1;
       resumeUploadRequestRef.current += 1;
       resumeUploadInFlightRef.current = false;
@@ -673,6 +716,8 @@ export const AnansiWizard = () => {
     }
 
     finishRequestRef.current += 1;
+    provisionRequestRef.current += 1;
+    provisionInFlightRef.current = false;
     setIsSavingRoles(false);
     setIsFinishing(false);
     setIsSigningOut(false);
@@ -686,6 +731,7 @@ export const AnansiWizard = () => {
     setStepIndex(0);
     setIsLoadingProfile(isDefined(accessToken));
     setErrorMessage(undefined);
+    setProvisionErrorMessage(undefined);
     setResumeUploadFailed(false);
     setResumeReady(false);
     setResumeParseStatus('missing');
@@ -1418,6 +1464,14 @@ export const AnansiWizard = () => {
       <OnboardingStepAnimatedItem index={3}>
         <StyledContent>
           {renderStep()}
+          {provisionErrorMessage && (
+            <>
+              <StyledTextButton onClick={retryProvisioning}>
+                Retry workspace setup
+              </StyledTextButton>
+              <InputHint danger>{provisionErrorMessage}</InputHint>
+            </>
+          )}
           {errorMessage && (
             <InputHint
               danger={errorMessage !== RESUME_PARSE_FAILED_SAVED_DETAIL}
