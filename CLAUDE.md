@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Twenty is an open-source CRM built with modern technologies in a monorepo structure. The codebase is organized as an Nx workspace with multiple packages.
 
-## Anansi Fresh-Login and Resume Hotfix (2026-08-28, PUSHED, NOT DEPLOYED)
+## Anansi Fresh-Login and Resume Hotfix (2026-08-28, LIVE; FRESH-USER PROOF PENDING)
 
 Standing project authorization requires committing and pushing completed Anansi
 work without asking for separate approval. It does not authorize merge,
@@ -43,11 +43,16 @@ snapshots. Frontend typecheck, type-aware Oxlint with zero warnings, Oxfmt, diff
 and scoped Gitleaks pass. Temporary dependency link was removed. Companion Core
 branch `fix/onboarding-resume-hotfix-core` passes 837 tests with 3 expected skips
 under forced RLS plus clean migrations, Alembic parity, classifier, Ruff, diff,
-and secret gates. This branch is committed and pushed under standing project
-authorization. Live release is in progress; no OAuth flow, browser launch, email
-send, or application submission occurred. A user-authorized fresh-start reset
-preserved only owner account/workspace `pran` and the approved
-`praniapx@gmail.com` allowlist entry. Deployed fresh-user proof is still
+and secret gates. Source `78d74744` passed GitHub test run `33192665207` and
+image run `33192665210`. Flux release manifest commit `9196880` deploys live
+server and worker digest
+`sha256:6b5371226f2ce7f76443e8ac251a0f27945f0aead5a935133fd11a688b46e8d7`.
+All deployments are Ready; `/welcome` is 200 and Google auth redirects with 302.
+Post-rollout Last Contact `stop` plus `PERSIST` left TTL `-1`, and the 17:20Z
+cron boundary was clean. No OAuth flow, browser launch, email send, or
+application submission occurred. A user-authorized fresh-start reset preserved
+only owner account/workspace `pran` and the approved `praniapx@gmail.com`
+allowlist entry. Deployed fresh-user login and authenticated resume proof remain
 required.
 
 ## Anansi Fork Status (2026-08-23)
