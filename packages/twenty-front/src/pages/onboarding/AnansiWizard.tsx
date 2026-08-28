@@ -293,10 +293,33 @@ const getResumeParseStatus = (
     : 'missing';
 };
 
+const resumeCanContinueOnboarding = (
+  response: AnansiProfileResponse,
+  status: ResumeParseStatus,
+): boolean => {
+  if (status === 'ready') {
+    return true;
+  }
+  if (status !== 'failed') {
+    return false;
+  }
+
+  const resumeRef = response.profile.resume_pdf_ref;
+  const text = response.profile.cv_text;
+  return (
+    typeof resumeRef === 'string' &&
+    resumeRef.trim().length > 0 &&
+    typeof text === 'string' &&
+    text.trim().length > 0
+  );
+};
+
 const RESUME_STATUS_POLL_MS = 1_500;
 const MAX_RESUME_STATUS_POLLS = 207;
 const RESUME_PARSE_FAILED_DETAIL =
   'Resume was saved, but fact extraction failed. Select the PDF again to retry.';
+const RESUME_PARSE_FAILED_SAVED_DETAIL =
+  'Resume saved. Fact extraction did not finish. You can continue.';
 const RESUME_PARSE_TIMEOUT_DETAIL =
   'Resume extraction is taking longer than expected. Select the PDF again to retry.';
 const RESUME_CAPACITY_FULL_DETAIL =
@@ -411,17 +434,26 @@ export const AnansiWizard = () => {
         currentProfileVersionRef.current = response.version;
       }
       const status = getResumeParseStatus(response);
+      const canContinueOnboarding = resumeCanContinueOnboarding(
+        response,
+        status,
+      );
 
       if (shouldApplyResumeState && !resumeUploadInFlightRef.current) {
         setResumeParseStatus(status);
-        setResumeReady(status === 'ready');
+        setResumeReady(canContinueOnboarding);
         setIsUploading(status === 'processing');
         setResumeUploadFailed(false);
         if (status === 'failed') {
-          setErrorMessage(RESUME_PARSE_FAILED_DETAIL);
+          setErrorMessage(
+            canContinueOnboarding
+              ? RESUME_PARSE_FAILED_SAVED_DETAIL
+              : RESUME_PARSE_FAILED_DETAIL,
+          );
         } else if (status === 'ready') {
           setErrorMessage((current) =>
             current === RESUME_PARSE_FAILED_DETAIL ||
+            current === RESUME_PARSE_FAILED_SAVED_DETAIL ||
             current === RESUME_PARSE_TIMEOUT_DETAIL
               ? undefined
               : current,
@@ -467,15 +499,32 @@ export const AnansiWizard = () => {
           throw error;
         }
 
-        // Workspace creation can survive a lost provisioning request. Repair
-        // that valid current workspace, then let Profile prove completion. A
-        // failed/ambiguous provision call is safe to follow with the read:
-        // Core may have committed after the browser lost its response.
-        await provisionAnansiWorkspace(accessToken).catch(() => undefined);
-        if (!isCurrentRequest()) {
-          return;
+        // Workspace creation can survive a lost provisioning response. Start
+        // that idempotent repair, but do not keep the wizard behind its slower
+        // view/dashboard bootstrap. The Core user commits first, so Profile can
+        // prove readiness while the remaining repair finishes in the background.
+        void provisionAnansiWorkspace(accessToken).catch(() => undefined);
+
+        for (let attempt = 0; ; attempt += 1) {
+          if (!isCurrentRequest()) {
+            return;
+          }
+          try {
+            response = await getAnansiProfile(accessToken);
+            break;
+          } catch (profileError) {
+            if (
+              !(profileError instanceof AnansiApiError) ||
+              profileError.status !== 401 ||
+              attempt >= 59
+            ) {
+              throw profileError;
+            }
+            await new Promise((resolve) =>
+              globalThis.setTimeout(resolve, 1_500),
+            );
+          }
         }
-        response = await getAnansiProfile(accessToken);
       }
 
       if (isCurrentRequest()) {
@@ -1064,9 +1113,11 @@ export const AnansiWizard = () => {
                 Retry upload
               </StyledTextButton>
             )}
-          {errorMessage && !resumeUploadFailed && (
-            <StyledTextButton onClick={loadProfile}>Retry</StyledTextButton>
-          )}
+          {errorMessage &&
+            !resumeUploadFailed &&
+            errorMessage !== RESUME_PARSE_FAILED_SAVED_DETAIL && (
+              <StyledTextButton onClick={loadProfile}>Retry</StyledTextButton>
+            )}
         </>
       );
     }
@@ -1367,7 +1418,13 @@ export const AnansiWizard = () => {
       <OnboardingStepAnimatedItem index={3}>
         <StyledContent>
           {renderStep()}
-          {errorMessage && <InputHint danger>{errorMessage}</InputHint>}
+          {errorMessage && (
+            <InputHint
+              danger={errorMessage !== RESUME_PARSE_FAILED_SAVED_DETAIL}
+            >
+              {errorMessage}
+            </InputHint>
+          )}
         </StyledContent>
       </OnboardingStepAnimatedItem>
 

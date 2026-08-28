@@ -355,10 +355,56 @@ describe('AnansiWizard', () => {
     ]);
   });
 
-  it('checks Profile after a provisioning request times out', async () => {
+  it('checks Profile while a provisioning response is still pending', async () => {
+    const calls: string[] = [];
+    let profileReads = 0;
+    let resolveProvision:
+      | ((response: ReturnType<typeof jsonOk>) => void)
+      | undefined;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const path = String(input).replace(ANANSI_API_URL, '');
+      const key = `${method} ${path}`;
+      calls.push(key);
+
+      if (key === 'GET /v1/profile') {
+        profileReads += 1;
+        return Promise.resolve(
+          profileReads === 1
+            ? jsonError(401, { detail: 'unauthenticated' })
+            : jsonOk(profileResponse()),
+        );
+      }
+
+      if (key === 'POST /v1/provision') {
+        return new Promise<ReturnType<typeof jsonOk>>((resolve) => {
+          resolveProvision = resolve;
+        });
+      }
+
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }) as unknown as typeof fetch;
+
+    renderWizard();
+
+    expect(await screen.findByLabelText('PDF resume')).toBeEnabled();
+    expect(calls).toEqual([
+      'GET /v1/profile',
+      'POST /v1/provision',
+      'GET /v1/profile',
+    ]);
+
+    await act(async () => {
+      resolveProvision?.(jsonOk({ status: 'provisioned' }));
+      await Promise.resolve();
+    });
+  });
+
+  it('aborts a pending provisioning response after Profile recovers', async () => {
     jest.useFakeTimers();
     const calls: string[] = [];
     let profileReads = 0;
+    let provisionAborted = false;
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const method = (init?.method ?? 'GET').toUpperCase();
       const path = String(input).replace(ANANSI_API_URL, '');
@@ -378,7 +424,10 @@ describe('AnansiWizard', () => {
         return new Promise<ReturnType<typeof jsonOk>>((_, reject) => {
           init?.signal?.addEventListener(
             'abort',
-            () => reject(new Error('aborted')),
+            () => {
+              provisionAborted = true;
+              reject(new Error('aborted'));
+            },
             { once: true },
           );
         });
@@ -389,20 +438,26 @@ describe('AnansiWizard', () => {
 
     renderWizard();
     await waitFor(() =>
-      expect(calls).toEqual(['GET /v1/profile', 'POST /v1/provision']),
+      expect(calls).toEqual([
+        'GET /v1/profile',
+        'POST /v1/provision',
+        'GET /v1/profile',
+      ]),
     );
+    expect(await screen.findByLabelText('PDF resume')).toBeEnabled();
+    expect(provisionAborted).toBe(false);
 
     await act(async () => {
       jest.advanceTimersByTime(90_000);
       await Promise.resolve();
     });
 
+    expect(provisionAborted).toBe(true);
     expect(calls).toEqual([
       'GET /v1/profile',
       'POST /v1/provision',
       'GET /v1/profile',
     ]);
-    expect(await screen.findByText('Add your resume')).toBeInTheDocument();
   });
 
   it('recovers an in-progress resume extraction after reload', async () => {
@@ -681,13 +736,14 @@ describe('AnansiWizard', () => {
     expect(screen.getByText('Resume received')).toBeInTheDocument();
   });
 
-  it('shows a retryable saved-resume extraction failure after reload', async () => {
+  it('continues from a saved resume after fact extraction fails', async () => {
     mockFetchRouter({
       'GET /v1/profile': [
         jsonOk(
           profileResponse({
             resume_pdf_ref: 'resumes/user/master.pdf',
             resume_parse_status: 'failed',
+            cv_text: 'Site reliability engineer experience',
           }),
         ),
       ],
@@ -697,11 +753,11 @@ describe('AnansiWizard', () => {
 
     expect(
       await screen.findByText(
-        'Resume was saved, but fact extraction failed. Select the PDF again to retry.',
+        'Resume saved. Fact extraction did not finish. You can continue.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('PDF resume')).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
   });
 
   it('accepts a nonblank legacy resume markdown document', async () => {
