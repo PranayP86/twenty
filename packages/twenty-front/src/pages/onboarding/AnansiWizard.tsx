@@ -41,6 +41,7 @@ import {
   patchAnansiProfile,
   postAnansiOnboardingComplete,
   postAnansiResume,
+  provisionAnansiWorkspace,
   putAnansiPolicy,
 } from '~/pages/anansi/anansiProfileApi';
 
@@ -454,7 +455,29 @@ export const AnansiWizard = () => {
     }
     setErrorMessage(undefined);
     try {
-      const response = await getAnansiProfile(accessToken);
+      let response: AnansiProfileResponse;
+      try {
+        response = await getAnansiProfile(accessToken);
+      } catch (error) {
+        if (
+          !(error instanceof AnansiApiError) ||
+          error.status !== 401 ||
+          !isCurrentRequest()
+        ) {
+          throw error;
+        }
+
+        // Workspace creation can survive a lost provisioning request. Repair
+        // that valid current workspace, then let Profile prove completion. A
+        // failed/ambiguous provision call is safe to follow with the read:
+        // Core may have committed after the browser lost its response.
+        await provisionAnansiWorkspace(accessToken).catch(() => undefined);
+        if (!isCurrentRequest()) {
+          return;
+        }
+        response = await getAnansiProfile(accessToken);
+      }
+
       if (isCurrentRequest()) {
         applyProfile(
           response,

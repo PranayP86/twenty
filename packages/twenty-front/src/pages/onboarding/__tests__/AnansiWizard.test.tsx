@@ -304,6 +304,57 @@ describe('AnansiWizard', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
   });
 
+  it('provisions a missing Core user before retrying Profile', async () => {
+    const calls: string[] = [];
+    mockFetchRouter(
+      {
+        'GET /v1/profile': [
+          jsonError(401, { detail: 'unauthenticated' }),
+          jsonOk(profileResponse()),
+        ],
+        'POST /v1/provision': [jsonOk({ status: 'provisioned' })],
+      },
+      (key) => calls.push(key),
+    );
+
+    renderWizard();
+
+    expect(await screen.findByText('Add your resume')).toBeInTheDocument();
+    expect(calls).toEqual([
+      'GET /v1/profile',
+      'POST /v1/provision',
+      'GET /v1/profile',
+    ]);
+    expect(
+      screen.queryByText(
+        "Couldn't load your saved onboarding progress. Please try again.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it('checks Profile after an ambiguous provisioning response', async () => {
+    const calls: string[] = [];
+    mockFetchRouter(
+      {
+        'GET /v1/profile': [
+          jsonError(401, { detail: 'unauthenticated' }),
+          jsonOk(profileResponse()),
+        ],
+        'POST /v1/provision': [jsonError(503)],
+      },
+      (key) => calls.push(key),
+    );
+
+    renderWizard();
+
+    expect(await screen.findByText('Add your resume')).toBeInTheDocument();
+    expect(calls).toEqual([
+      'GET /v1/profile',
+      'POST /v1/provision',
+      'GET /v1/profile',
+    ]);
+  });
+
   it('recovers an in-progress resume extraction after reload', async () => {
     jest.useFakeTimers();
     const fetchMock = mockFetchRouter({

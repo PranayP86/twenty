@@ -284,6 +284,23 @@ export function patchAnansiTourSeen(
   return nextWrite;
 }
 
+// A valid Twenty workspace can reach the Anansi wizard before a lost or
+// interrupted provisioning request creates its Core user. This call is
+// idempotent and lets the wizard repair that exact workspace with its own
+// bearer before it retries Profile.
+export const provisionAnansiWorkspace = async (
+  accessToken: string,
+): Promise<void> => {
+  await anansiApiRequest<Record<string, unknown>>(
+    '/v1/provision',
+    accessToken,
+    {
+      method: 'POST',
+      body: '{}',
+    },
+  );
+};
+
 // ANANSI PATCH (WS-C): wizard resume/profile/completion calls. The multipart
 // request intentionally omits Content-Type so fetch supplies its boundary.
 export const getAnansiProfile = (

@@ -55,6 +55,18 @@ only owner account/workspace `pran` and the approved `praniapx@gmail.com`
 allowlist entry. Deployed fresh-user login and authenticated resume proof remain
 required.
 
+**Skipped provisioning recovery (2026-08-28, LOCAL):** Live proof created active
+friend workspace `powerful-purple-falcon`, but no Core user. Core received valid
+CORS and Twenty metadata calls, then returned 401 from Profile and resume because
+`/v1/provision` never arrived. The Anansi wizard now treats its initial Profile
+401 as a recoverable missing-provision state: it calls idempotent
+`POST /v1/provision` with the current workspace bearer, then requires a successful
+Profile read. It still reads Profile after an ambiguous provision response, so a
+lost response cannot hide a committed repair. Stale identity checks remain in
+force. The new tests failed before production code, then passed; the six focused
+auth/onboarding suites pass 63 tests. Frontend typecheck, type-aware Oxlint with
+zero warnings, targeted Oxfmt, and diff checks pass. Release is pending.
+
 ## Anansi Fork Status (2026-08-23)
 
 Work only from Morona repo `/home/pran/Developer/anansi-twenty`. Current local
