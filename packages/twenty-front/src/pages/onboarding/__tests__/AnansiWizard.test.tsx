@@ -29,6 +29,19 @@ import {
 import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
 
 const mockSetNextOnboardingStatus = jest.fn();
+const mockGoBackToPreviousOnboardingStep = jest.fn();
+const mockSignOut = jest.fn(() => Promise.resolve());
+
+jest.mock('@/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ signOut: mockSignOut }),
+}));
+
+jest.mock('@/onboarding/hooks/useGoBackToPreviousOnboardingStep', () => ({
+  useGoBackToPreviousOnboardingStep: () => ({
+    goBackToPreviousOnboardingStep: mockGoBackToPreviousOnboardingStep,
+    isGoingBackToPreviousOnboardingStep: false,
+  }),
+}));
 
 jest.mock('@/onboarding/hooks/useSetNextOnboardingStatus', () => ({
   useSetNextOnboardingStatus: () => mockSetNextOnboardingStatus,
@@ -224,6 +237,53 @@ describe('AnansiWizard', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('offers Back and Sign out on the first Anansi step', async () => {
+    mockFetchRouter({
+      'GET /v1/profile': [
+        jsonOk(
+          profileResponse({
+            resume_pdf_ref: 'resumes/user/master.pdf',
+            resume_parse_status: 'ready',
+            cv_parsed: { summary: 'Senior SRE' },
+          }),
+        ),
+      ],
+    });
+
+    renderWizard();
+
+    await screen.findByText('Resume received');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(mockGoBackToPreviousOnboardingStep).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+  });
+
+  it('returns to the preceding Anansi step with Back', async () => {
+    mockFetchRouter({
+      'GET /v1/profile': [
+        jsonOk(
+          profileResponse({
+            resume_pdf_ref: 'resumes/user/master.pdf',
+            resume_parse_status: 'ready',
+            cv_parsed: { summary: 'Senior SRE' },
+          }),
+        ),
+      ],
+    });
+
+    renderWizard();
+
+    await screen.findByText('Resume received');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('What roles do you want?');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByText('Add your resume')).toBeInTheDocument();
+    expect(mockGoBackToPreviousOnboardingStep).not.toHaveBeenCalled();
   });
 
   it('loads saved resume state after the StrictMode effect replay', async () => {

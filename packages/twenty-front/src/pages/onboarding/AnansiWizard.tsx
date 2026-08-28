@@ -12,6 +12,7 @@ import { Loader } from 'twenty-ui/feedback';
 import { InputHint, MainButton, Toggle } from 'twenty-ui/input';
 import { themeCssVariables } from 'twenty-ui/theme-constants';
 
+import { useAuth } from '@/auth/hooks/useAuth';
 import { tokenPairState } from '@/auth/states/tokenPairState';
 import { OnboardingStepAnimatedItem } from '@/onboarding/components/OnboardingStepAnimatedItem';
 import { StyledOnboardingContentBlock } from '@/onboarding/components/StyledOnboardingContentBlock';
@@ -19,6 +20,7 @@ import { StyledOnboardingStepHeading } from '@/onboarding/components/StyledOnboa
 import { StyledOnboardingStepPage } from '@/onboarding/components/StyledOnboardingStepPage';
 import { StyledOnboardingStepSubtitle } from '@/onboarding/components/StyledOnboardingStepSubtitle';
 import { StyledOnboardingStepTitle } from '@/onboarding/components/StyledOnboardingStepTitle';
+import { useGoBackToPreviousOnboardingStep } from '@/onboarding/hooks/useGoBackToPreviousOnboardingStep';
 import { useSetNextOnboardingStatus } from '@/onboarding/hooks/useSetNextOnboardingStatus';
 import { Select } from '@/ui/input/components/Select';
 import { TextInput } from '@/ui/input/components/TextInput';
@@ -318,6 +320,11 @@ export const AnansiWizard = () => {
     [accessToken],
   );
   const setNextOnboardingStatus = useSetNextOnboardingStatus();
+  const { signOut } = useAuth();
+  const {
+    goBackToPreviousOnboardingStep,
+    isGoingBackToPreviousOnboardingStep,
+  } = useGoBackToPreviousOnboardingStep();
   const [completeWizardMutation] = useMutation<CompleteWizardMutation>(
     COMPLETE_ANANSI_WIZARD,
   );
@@ -353,6 +360,7 @@ export const AnansiWizard = () => {
   );
   const [meDraft, setMeDraft] = useState<AnansiMePatch>();
   const [isFinishing, setIsFinishing] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   // oxlint-disable-next-line twenty/no-state-useref
   const isMountedRef = useRef(true);
   // oxlint-disable-next-line twenty/no-state-useref
@@ -595,6 +603,7 @@ export const AnansiWizard = () => {
     finishRequestRef.current += 1;
     setIsSavingRoles(false);
     setIsFinishing(false);
+    setIsSigningOut(false);
 
     resumeUploadRequestRef.current += 1;
     resumeUploadInFlightRef.current = false;
@@ -955,7 +964,19 @@ export const AnansiWizard = () => {
 
   const goBack = () => {
     setErrorMessage(undefined);
-    setStepIndex((current) => Math.max(0, current - 1));
+    if (stepIndex === 0) {
+      void goBackToPreviousOnboardingStep();
+      return;
+    }
+    setStepIndex((current) => current - 1);
+  };
+
+  const handleSignOut = async () => {
+    if (isSigningOut) {
+      return;
+    }
+    setIsSigningOut(true);
+    await signOut();
   };
 
   const titles = [
@@ -1284,7 +1305,8 @@ export const AnansiWizard = () => {
     (stepIndex === 1 && (targetRoles.length === 0 || isSavingRoles)) ||
     (stepIndex === 2 && !isDefined(workMode)) ||
     (stepIndex === 3 && !locationIsValid) ||
-    isFinishing;
+    isFinishing ||
+    isSigningOut;
 
   const handlePrimaryAction = () => {
     setErrorMessage(undefined);
@@ -1328,14 +1350,25 @@ export const AnansiWizard = () => {
 
       <OnboardingStepAnimatedItem index={4}>
         <StyledFooter>
-          {stepIndex > 0 && (
-            <StyledTextButton onClick={goBack} disabled={isFinishing}>
-              Back
-            </StyledTextButton>
-          )}
+          <StyledTextButton onClick={handleSignOut} disabled={isSigningOut}>
+            {isSigningOut ? 'Signing out…' : 'Sign out'}
+          </StyledTextButton>
+          <StyledTextButton
+            onClick={goBack}
+            disabled={
+              isFinishing ||
+              isSigningOut ||
+              (stepIndex === 0 && isGoingBackToPreviousOnboardingStep)
+            }
+          >
+            Back
+          </StyledTextButton>
           <StyledFooterSpacer />
           {isOptionalStep && (
-            <StyledTextButton onClick={skipOptionalStep} disabled={isFinishing}>
+            <StyledTextButton
+              onClick={skipOptionalStep}
+              disabled={isFinishing || isSigningOut}
+            >
               Skip
             </StyledTextButton>
           )}

@@ -26,24 +26,29 @@ including React StrictMode effect replay. The wizard binds Profile, resume
 upload/status, role-save, and Finish work to stable JWT
 `userId:workspaceId`; same-session bearer rotation remains valid and later REST
 calls use the newest token, while an identity change clears state and invalidates
-older requests. Durable `processing|ready|failed` resume status supports reload,
-ambiguous upload response, HTTP 409, and hung-read recovery. Capacity HTTP 503
-stays a retryable upload error instead of false processing recovery.
-Profile-version baselines prevent an old ready Profile from completing a newer
-replacement; a timed-out retry that joins an existing upload accepts its exact
-terminal version. Frontend legacy readiness matches Core for nonblank markdown
-and rejects blank PDF references. Terminal status on the last allowed poll wins,
-and timeout keeps the selected file available through `Retry upload`. Focused
-proof passes 6 suites and 59 tests. Complete `twenty-front` passes 1,055 suites,
-6,487 tests, and 139 snapshots. Frontend typecheck, type-aware Oxlint with zero
-warnings, Oxfmt, diff, and scoped Gitleaks pass. Temporary dependency link was
-removed. Companion Core branch `fix/onboarding-resume-hotfix-core` passes 837
-tests with 3 expected skips under forced RLS plus clean migrations, Alembic
-parity, classifier, Ruff, diff, and secret gates. This branch is committed and
-pushed under standing project authorization. No PR, merge, image build,
-deployment, OAuth flow, browser launch, or account-data change occurred. Live images remain unchanged. A missing supported Last Contact
-kill-switch key was restored with `stop` plus `PERSIST`; TTL is `-1`, and the next
-cron boundary was clean. Deployed fresh-user proof is still required.
+older requests. Every wizard screen now exposes `Back` and `Sign out`. Internal
+Back stays inside the seven-screen wizard; first-screen Back uses Twenty's
+server-backed previous-onboarding mutation. Sign out uses the complete existing
+auth cleanup and returns to `https://anansi.work`. Durable
+`processing|ready|failed` resume status supports reload, ambiguous upload
+response, HTTP 409, and hung-read recovery. Capacity HTTP 503 stays a retryable
+upload error instead of false processing recovery. Profile-version baselines
+prevent an old ready Profile from completing a newer replacement; a timed-out
+retry that joins an existing upload accepts its exact terminal version. Frontend
+legacy readiness matches Core for nonblank markdown and rejects blank PDF
+references. Terminal status on the last allowed poll wins, and timeout keeps the
+selected file available through `Retry upload`. Focused proof passes 6 suites and
+61 tests. Complete `twenty-front` passes 1,055 suites, 6,489 tests, and 139
+snapshots. Frontend typecheck, type-aware Oxlint with zero warnings, Oxfmt, diff,
+and scoped Gitleaks pass. Temporary dependency link was removed. Companion Core
+branch `fix/onboarding-resume-hotfix-core` passes 837 tests with 3 expected skips
+under forced RLS plus clean migrations, Alembic parity, classifier, Ruff, diff,
+and secret gates. This branch is committed and pushed under standing project
+authorization. Live release is in progress; no OAuth flow, browser launch, email
+send, or application submission occurred. A user-authorized fresh-start reset
+preserved only owner account/workspace `pran` and the approved
+`praniapx@gmail.com` allowlist entry. Deployed fresh-user proof is still
+required.
 
 ## Anansi Fork Status (2026-08-23)
 
