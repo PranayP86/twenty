@@ -62,10 +62,12 @@ CORS and Twenty metadata calls, then returned 401 from Profile and resume becaus
 401 as a recoverable missing-provision state: it calls idempotent
 `POST /v1/provision` with the current workspace bearer, then requires a successful
 Profile read. It still reads Profile after an ambiguous provision response, so a
-lost response cannot hide a committed repair. Stale identity checks remain in
-force. The new tests failed before production code, then passed; the six focused
-auth/onboarding suites pass 63 tests. Frontend typecheck, type-aware Oxlint with
-zero warnings, targeted Oxfmt, and diff checks pass. Release is pending.
+lost response cannot hide a committed repair. The provision request has a
+90-second client deadline, so a hung connection cannot keep onboarding loading
+forever before that Profile proof. Stale identity checks remain in force. The new
+tests failed before production code, then passed; the six focused auth/onboarding
+suites pass 64 tests. Frontend typecheck, type-aware Oxlint with zero warnings,
+targeted Oxfmt, and diff checks pass. Release is pending.
 
 ## Anansi Fork Status (2026-08-23)
 

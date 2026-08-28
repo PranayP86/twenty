@@ -355,6 +355,56 @@ describe('AnansiWizard', () => {
     ]);
   });
 
+  it('checks Profile after a provisioning request times out', async () => {
+    jest.useFakeTimers();
+    const calls: string[] = [];
+    let profileReads = 0;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const path = String(input).replace(ANANSI_API_URL, '');
+      const key = `${method} ${path}`;
+      calls.push(key);
+
+      if (key === 'GET /v1/profile') {
+        profileReads += 1;
+        return Promise.resolve(
+          profileReads === 1
+            ? jsonError(401, { detail: 'unauthenticated' })
+            : jsonOk(profileResponse()),
+        );
+      }
+
+      if (key === 'POST /v1/provision') {
+        return new Promise<ReturnType<typeof jsonOk>>((_, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new Error('aborted')),
+            { once: true },
+          );
+        });
+      }
+
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }) as unknown as typeof fetch;
+
+    renderWizard();
+    await waitFor(() =>
+      expect(calls).toEqual(['GET /v1/profile', 'POST /v1/provision']),
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(90_000);
+      await Promise.resolve();
+    });
+
+    expect(calls).toEqual([
+      'GET /v1/profile',
+      'POST /v1/provision',
+      'GET /v1/profile',
+    ]);
+    expect(await screen.findByText('Add your resume')).toBeInTheDocument();
+  });
+
   it('recovers an in-progress resume extraction after reload', async () => {
     jest.useFakeTimers();
     const fetchMock = mockFetchRouter({

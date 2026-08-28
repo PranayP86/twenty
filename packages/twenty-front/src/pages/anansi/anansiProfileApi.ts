@@ -288,17 +288,30 @@ export function patchAnansiTourSeen(
 // interrupted provisioning request creates its Core user. This call is
 // idempotent and lets the wizard repair that exact workspace with its own
 // bearer before it retries Profile.
+const ANANSI_PROVISION_TIMEOUT_MS = 90_000;
+
 export const provisionAnansiWorkspace = async (
   accessToken: string,
 ): Promise<void> => {
-  await anansiApiRequest<Record<string, unknown>>(
-    '/v1/provision',
-    accessToken,
-    {
-      method: 'POST',
-      body: '{}',
-    },
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(
+    () => controller.abort(),
+    ANANSI_PROVISION_TIMEOUT_MS,
   );
+
+  try {
+    await anansiApiRequest<Record<string, unknown>>(
+      '/v1/provision',
+      accessToken,
+      {
+        method: 'POST',
+        body: '{}',
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 };
 
 // ANANSI PATCH (WS-C): wizard resume/profile/completion calls. The multipart
