@@ -79,6 +79,26 @@ restored TTL `-1`; the 20:30Z cron boundary had zero server/worker errors and
 zero Last Contact matches, and TTL remained `-1`. Authenticated browser
 continuation and completed onboarding proof remain pending.
 
+**Single Google OAuth hardening (2026-08-28, LIVE; AUTHENTICATED PROOF PENDING):** A full
+auth trace confirmed that normal central SSO and workspace token exchange require
+one Google OAuth. One automatic fallback still called Google again when the
+newly created workspace's original login token expired before its first exchange.
+Source `bf275bdd73` removes that fallback. Provisioning retains the central
+workspace-agnostic token pair, requests a fresh login token for the exact created
+workspace, exchanges and provisions it, then redirects `/verify` with that fresh
+reusable token. The regression asserts zero `signInWithGoogle` calls and the
+complete fresh-token path. Full `twenty-front` passes 1,055 suites, 6,497 tests,
+and 139 snapshots; typecheck, Oxfmt, diff, and scoped Gitleaks pass. Full Oxlint
+still reports pre-existing Anansi custom-rule debt, including three unchanged
+`useRef` sites in this file; no unrelated lint cleanup is included. GitHub test
+run `33213543586` and image run `33213543496` passed. Image digest
+`sha256:3deef3d1ba45581fe7785438b9c99decaead36345e602fd69c4b6d7c86c65b23`
+is pinned by Anansi release commit `287e6e6`; Flux applied `5f95b2e`, both Twenty
+deployments are Ready, public/auth smoke checks pass, and the Last Contact switch
+is persistent at TTL `-1`. The 22:00Z cron cycle processed its trigger without
+server/worker ERROR or Last Contact failure. Live recent-session rows showed one Google session followed by one expected workspace bridge, but
+authenticated browser proof after this release remains required.
+
 ## Anansi Fork Status (2026-08-23)
 
 Work only from Morona repo `/home/pran/Developer/anansi-twenty`. Current local
