@@ -8,8 +8,10 @@ import { currentWorkspaceMemberState } from '@/auth/states/currentWorkspaceMembe
 import { currentWorkspaceMembersState } from '@/auth/states/currentWorkspaceMembersState';
 import { currentWorkspaceState } from '@/auth/states/currentWorkspaceState';
 import { isCurrentUserLoadedState } from '@/auth/states/isCurrentUserLoadedState';
+import { isRedeemingSSOExchangeTokenState } from '@/auth/states/isRedeemingSSOExchangeTokenState';
 import { useInitializeFormatPreferences } from '@/localization/hooks/useInitializeFormatPreferences';
 import { getDateFnsLocale } from '@/ui/field/display/utils/getDateFnsLocale';
+import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
 import {
   type ColorScheme,
@@ -31,6 +33,9 @@ import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
 
 export const UserMetadataProviderInitialEffect = () => {
   const isLogged = useIsLogged();
+  const isRedeemingSSOExchangeToken = useAtomStateValue(
+    isRedeemingSSOExchangeTokenState,
+  );
   const store = useStore();
   const [isInitialized, setIsInitialized] = useState(false);
 
@@ -67,7 +72,7 @@ export const UserMetadataProviderInitialEffect = () => {
     [store],
   );
 
-  const shouldSkipUserQuery = !isLogged;
+  const shouldSkipUserQuery = isRedeemingSSOExchangeToken || !isLogged;
 
   const { data: userQueryData, loading: userQueryLoading } = useQuery(
     GetCurrentUserDocument,
@@ -78,7 +83,16 @@ export const UserMetadataProviderInitialEffect = () => {
   );
 
   useEffect(() => {
-    if (isInitialized) {
+    if (!isRedeemingSSOExchangeToken) {
+      return;
+    }
+
+    setIsInitialized(false);
+    setIsCurrentUserLoaded(false);
+  }, [isRedeemingSSOExchangeToken, setIsCurrentUserLoaded]);
+
+  useEffect(() => {
+    if (isInitialized || isRedeemingSSOExchangeToken) {
       return;
     }
 
@@ -174,6 +188,7 @@ export const UserMetadataProviderInitialEffect = () => {
   }, [
     isInitialized,
     isLogged,
+    isRedeemingSSOExchangeToken,
     userQueryLoading,
     userQueryData?.currentUser,
     setCurrentUser,

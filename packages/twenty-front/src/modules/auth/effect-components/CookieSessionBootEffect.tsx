@@ -4,10 +4,17 @@ import { useStore } from 'jotai';
 import { useEffect, useRef } from 'react';
 import { isDefined } from 'twenty-shared/utils';
 
+import { currentUserState } from '@/auth/states/currentUserState';
+import { currentUserWorkspaceState } from '@/auth/states/currentUserWorkspaceState';
+import { currentWorkspaceMemberState } from '@/auth/states/currentWorkspaceMemberState';
+import { currentWorkspaceState } from '@/auth/states/currentWorkspaceState';
 import { isCookieAuthActiveState } from '@/auth/states/isCookieAuthActiveState';
 import { isPendingServerSignOutState } from '@/auth/states/isPendingServerSignOutState';
+import { isRedeemingSSOExchangeTokenState } from '@/auth/states/isRedeemingSSOExchangeTokenState';
 import { tokenPairState } from '@/auth/states/tokenPairState';
+import { clearSessionLocalStorageKeys } from '@/auth/utils/clearSessionLocalStorageKeys';
 import { ensureTokenRenewed } from '@/auth/utils/ensureTokenRenewed';
+import { runServerSessionSignOut } from '@/auth/utils/runServerSessionSignOut';
 import { clientConfigApiStatusState } from '@/client-config/states/clientConfigApiStatusState';
 import { useAtomState } from '@/ui/utilities/state/jotai/hooks/useAtomState';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
@@ -46,10 +53,22 @@ export const CookieSessionBootEffect = () => {
     isCookieAuthActiveState,
   );
   const tokenPair = useAtomStateValue(tokenPairState);
+  const isRedeemingSSOExchangeToken = useAtomStateValue(
+    isRedeemingSSOExchangeTokenState,
+  );
   // oxlint-disable-next-line twenty/no-state-useref
   const hasProbeRunRef = useRef(false);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const effectGenerationRef = useRef(0);
 
   useEffect(() => {
+    const effectGeneration = effectGenerationRef.current + 1;
+    effectGenerationRef.current = effectGeneration;
+    let ownsProbe = false;
+    const isCurrentGeneration = () =>
+      effectGenerationRef.current === effectGeneration &&
+      !store.get(isRedeemingSSOExchangeTokenState.atom);
+
     const probeCookieSession = async (): Promise<CookieSessionProbeResult> => {
       try {
         const result = await apolloClient.query({
@@ -79,6 +98,9 @@ export const CookieSessionBootEffect = () => {
 
     const attemptCookieSessionBoot = async (): Promise<boolean> => {
       const probeResult = await probeCookieSession();
+      if (!isCurrentGeneration()) {
+        return true;
+      }
 
       if (probeResult === 'authenticated') {
         switchToCookieAuth();
@@ -97,8 +119,14 @@ export const CookieSessionBootEffect = () => {
       if (!(await ensureTokenRenewed(store))) {
         return false;
       }
+      if (!isCurrentGeneration()) {
+        return true;
+      }
 
       const probeResultAfterRenewal = await probeCookieSession();
+      if (!isCurrentGeneration()) {
+        return true;
+      }
 
       if (probeResultAfterRenewal === 'authenticated') {
         switchToCookieAuth();
@@ -110,13 +138,28 @@ export const CookieSessionBootEffect = () => {
     };
 
     const runCookieSessionBoot = async () => {
+      if (isRedeemingSSOExchangeToken) {
+        hasProbeRunRef.current = false;
+        return;
+      }
       if (!isLoadedOnce) {
         return;
       }
 
       if (store.get(isPendingServerSignOutState.atom)) {
+        sessionStorage.clear();
+        store.set(tokenPairState.atom, null);
+        setIsCookieAuthActive(false);
+        store.set(currentUserState.atom, null);
+        store.set(currentWorkspaceState.atom, null);
+        store.set(currentWorkspaceMemberState.atom, null);
+        store.set(currentUserWorkspaceState.atom, null);
+        clearSessionLocalStorageKeys();
+
         try {
-          await apolloClient.mutate({ mutation: SignOutDocument });
+          await runServerSessionSignOut(() =>
+            apolloClient.mutate({ mutation: SignOutDocument }),
+          );
           store.set(isPendingServerSignOutState.atom, false);
         } catch {}
 
@@ -128,17 +171,28 @@ export const CookieSessionBootEffect = () => {
       }
 
       hasProbeRunRef.current = true;
+      ownsProbe = true;
 
-      if (!(await attemptCookieSessionBoot())) {
+      if (!(await attemptCookieSessionBoot()) && isCurrentGeneration()) {
         hasProbeRunRef.current = false;
       }
     };
 
     void runCookieSessionBoot();
+
+    return () => {
+      if (effectGenerationRef.current === effectGeneration) {
+        effectGenerationRef.current += 1;
+      }
+      if (ownsProbe) {
+        hasProbeRunRef.current = false;
+      }
+    };
   }, [
     apolloClient,
     isCookieAuthActive,
     isLoadedOnce,
+    isRedeemingSSOExchangeToken,
     setIsCookieAuthActive,
     store,
     tokenPair,

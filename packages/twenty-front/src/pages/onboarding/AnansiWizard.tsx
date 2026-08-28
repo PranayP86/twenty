@@ -5,6 +5,7 @@ import { gql } from '@apollo/client';
 import { useMutation } from '@apollo/client/react';
 import { styled } from '@linaria/react';
 import { useLingui } from '@lingui/react/macro';
+import { jwtDecode } from 'jwt-decode';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isDefined } from 'twenty-shared/utils';
 import { Loader } from 'twenty-ui/feedback';
@@ -189,8 +190,8 @@ const StyledTextAreaLabel = styled.label`
   color: ${themeCssVariables.font.color.secondary};
   display: flex;
   flex-direction: column;
-  gap: ${themeCssVariables.spacing[2]};
   font-size: ${themeCssVariables.font.size.sm};
+  gap: ${themeCssVariables.spacing[2]};
 `;
 
 const StyledPlanList = styled.ul`
@@ -216,6 +217,33 @@ const DEFAULT_AWAKE_HOURS: AnansiAwakeHours = {
   end: '18:00',
 };
 
+type AccessTokenIdentity = {
+  sub?: unknown;
+  userId?: unknown;
+  workspaceId?: unknown;
+};
+
+const getSessionIdentity = (
+  accessToken: string | undefined,
+): string | undefined => {
+  if (!isDefined(accessToken)) {
+    return undefined;
+  }
+
+  try {
+    const payload = jwtDecode<AccessTokenIdentity>(accessToken);
+    const userId =
+      typeof payload.userId === 'string' ? payload.userId : payload.sub;
+    if (typeof userId === 'string' && typeof payload.workspaceId === 'string') {
+      return `${userId}:${payload.workspaceId}`;
+    }
+  } catch {
+    // Treat malformed test/development tokens as distinct opaque sessions.
+  }
+
+  return `opaque:${accessToken}`;
+};
+
 const getStoredTargetRoles = (response: AnansiProfileResponse): string[] => {
   const roles = response.profile.target_roles;
   if (!Array.isArray(roles)) {
@@ -223,13 +251,57 @@ const getStoredTargetRoles = (response: AnansiProfileResponse): string[] => {
   }
 
   return roles.filter(
-    (role): role is string => typeof role === 'string' && role.trim().length > 0,
+    (role): role is string =>
+      typeof role === 'string' && role.trim().length > 0,
   );
 };
 
-const hasStoredResume = (response: AnansiProfileResponse): boolean =>
-  typeof response.profile.resume_pdf_ref === 'string' &&
-  response.profile.resume_pdf_ref.length > 0;
+type ResumeParseStatus = 'missing' | 'processing' | 'ready' | 'failed';
+
+const getResumeParseStatus = (
+  response: AnansiProfileResponse,
+): ResumeParseStatus => {
+  const status = response.profile.resume_parse_status;
+  if (status === 'processing' || status === 'failed') {
+    return status;
+  }
+  if (status !== undefined && status !== null && status !== 'ready') {
+    return 'missing';
+  }
+
+  const markdown = response.profile.cv_markdown;
+  if (typeof markdown === 'string' && markdown.trim().length > 0) {
+    return 'ready';
+  }
+
+  const resumeRef = response.profile.resume_pdf_ref;
+  if (typeof resumeRef !== 'string' || resumeRef.trim().length === 0) {
+    return 'missing';
+  }
+
+  const parsed = response.profile.cv_parsed;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return 'missing';
+  }
+
+  const summary = (parsed as { summary?: unknown }).summary;
+  return typeof summary === 'string' && summary.trim().length > 0
+    ? 'ready'
+    : 'missing';
+};
+
+const RESUME_STATUS_POLL_MS = 1_500;
+const MAX_RESUME_STATUS_POLLS = 207;
+const RESUME_PARSE_FAILED_DETAIL =
+  'Resume was saved, but fact extraction failed. Select the PDF again to retry.';
+const RESUME_PARSE_TIMEOUT_DETAIL =
+  'Resume extraction is taking longer than expected. Select the PDF again to retry.';
+const RESUME_CAPACITY_FULL_DETAIL =
+  'resume upload capacity is full; try again later';
+const resumeUploadMayStillBeRunning = (error: unknown) =>
+  !(error instanceof AnansiApiError) ||
+  error.status === 409 ||
+  (error.status >= 500 && error.detail !== RESUME_CAPACITY_FULL_DETAIL);
 
 const STEP_COUNT = 7;
 
@@ -241,6 +313,10 @@ export const AnansiWizard = () => {
   const { t } = useLingui();
   const tokenPair = useAtomStateValue(tokenPairState);
   const accessToken = tokenPair?.accessOrWorkspaceAgnosticToken.token;
+  const sessionIdentity = useMemo(
+    () => getSessionIdentity(accessToken),
+    [accessToken],
+  );
   const setNextOnboardingStatus = useSetNextOnboardingStatus();
   const [completeWizardMutation] = useMutation<CompleteWizardMutation>(
     COMPLETE_ANANSI_WIZARD,
@@ -252,31 +328,54 @@ export const AnansiWizard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [resumeUploadFailed, setResumeUploadFailed] = useState(false);
   const [resumeReady, setResumeReady] = useState(false);
+  const [resumeParseStatus, setResumeParseStatus] =
+    useState<ResumeParseStatus>('missing');
+  const [resumeRecoveryGeneration, setResumeRecoveryGeneration] = useState(0);
   const [resumeFile, setResumeFile] = useState<File>();
   const [uploadedFilename, setUploadedFilename] = useState<string>();
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [roleDraft, setRoleDraft] = useState('');
   const [isSavingRoles, setIsSavingRoles] = useState(false);
   const [workMode, setWorkMode] = useState<AnansiWorkMode>();
-  const [locationModel, setLocationModel] =
-    useState<AnansiLocation['model']>();
+  const [locationModel, setLocationModel] = useState<AnansiLocation['model']>();
   const [timezoneRangeStart, setTimezoneRangeStart] = useState('');
   const [timezoneRangeEnd, setTimezoneRangeEnd] = useState('');
   const [city, setCity] = useState('');
   const [radiusMiles, setRadiusMiles] = useState('100');
   const [educationOnResume, setEducationOnResume] = useState(false);
-  const [fluffLevel, setFluffLevel] =
-    useState<AnansiFluffLevel>('balanced');
+  const [fluffLevel, setFluffLevel] = useState<AnansiFluffLevel>('balanced');
   const [approvedClaims, setApprovedClaims] = useState('');
   const [timezone, setTimezone] = useState(getDefaultTimezone);
   const [awakeHours, setAwakeHours] =
     useState<AnansiAwakeHours>(DEFAULT_AWAKE_HOURS);
-  const [policyDraft, setPolicyDraft] = useState<
-    Partial<AnansiPolicyDocument>
-  >({});
+  const [policyDraft, setPolicyDraft] = useState<Partial<AnansiPolicyDocument>>(
+    {},
+  );
   const [meDraft, setMeDraft] = useState<AnansiMePatch>();
   const [isFinishing, setIsFinishing] = useState(false);
+  // oxlint-disable-next-line twenty/no-state-useref
   const isMountedRef = useRef(true);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const currentAccessTokenRef = useRef(accessToken);
+  currentAccessTokenRef.current = accessToken;
+  // oxlint-disable-next-line twenty/no-state-useref
+  const currentSessionIdentityRef = useRef(sessionIdentity);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const currentProfileVersionRef = useRef<number | null>(null);
+  // `undefined` means reload recovery with no upload started by this component.
+  // `null` means this component started from no existing Profile version.
+  // oxlint-disable-next-line twenty/no-state-useref
+  const resumeUploadBaselineVersionRef = useRef<number | null | undefined>(
+    undefined,
+  );
+  // oxlint-disable-next-line twenty/no-state-useref
+  const profileRequestRef = useRef(0);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const finishRequestRef = useRef(0);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const resumeUploadRequestRef = useRef(0);
+  // oxlint-disable-next-line twenty/no-state-useref
+  const resumeUploadInFlightRef = useRef(false);
 
   const timezoneOptions = useMemo(() => {
     if (ANANSI_TIMEZONE_OPTIONS.some((option) => option.value === timezone)) {
@@ -286,96 +385,342 @@ export const AnansiWizard = () => {
   }, [timezone]);
 
   const timezoneRangeOptions = useMemo(
-    () => [
-      { label: 'Choose timezone', value: '' },
-      ...ANANSI_TIMEZONE_OPTIONS,
-    ],
+    () => [{ label: 'Choose timezone', value: '' }, ...ANANSI_TIMEZONE_OPTIONS],
     [],
   );
 
-  const applyProfile = useCallback((response: AnansiProfileResponse) => {
-    setResumeReady((current) => current || hasStoredResume(response));
-    const storedRoles = getStoredTargetRoles(response);
-    setTargetRoles((current) =>
-      current.length === 0 && storedRoles.length > 0 ? storedRoles : current,
-    );
-  }, []);
+  const applyProfile = useCallback(
+    (
+      response: AnansiProfileResponse,
+      shouldApplyResumeState: boolean = true,
+    ) => {
+      if (
+        response.version !== null &&
+        (currentProfileVersionRef.current === null ||
+          response.version > currentProfileVersionRef.current)
+      ) {
+        currentProfileVersionRef.current = response.version;
+      }
+      const status = getResumeParseStatus(response);
+
+      if (shouldApplyResumeState && !resumeUploadInFlightRef.current) {
+        setResumeParseStatus(status);
+        setResumeReady(status === 'ready');
+        setIsUploading(status === 'processing');
+        setResumeUploadFailed(false);
+        if (status === 'failed') {
+          setErrorMessage(RESUME_PARSE_FAILED_DETAIL);
+        } else if (status === 'ready') {
+          setErrorMessage((current) =>
+            current === RESUME_PARSE_FAILED_DETAIL ||
+            current === RESUME_PARSE_TIMEOUT_DETAIL
+              ? undefined
+              : current,
+          );
+        }
+      }
+
+      const storedRoles = getStoredTargetRoles(response);
+      setTargetRoles((current) =>
+        current.length === 0 && storedRoles.length > 0 ? storedRoles : current,
+      );
+    },
+    [],
+  );
 
   const loadProfile = useCallback(async () => {
     if (!isDefined(accessToken)) {
       return;
     }
 
-    setIsLoadingProfile(true);
+    const requestId = profileRequestRef.current + 1;
+    profileRequestRef.current = requestId;
+    const resumeUploadRequestId = resumeUploadRequestRef.current;
+    const shouldApplyResumeState = !resumeUploadInFlightRef.current;
+    const isCurrentRequest = () =>
+      isMountedRef.current &&
+      currentAccessTokenRef.current === accessToken &&
+      profileRequestRef.current === requestId;
+    if (!resumeUploadInFlightRef.current) {
+      setIsLoadingProfile(true);
+    }
     setErrorMessage(undefined);
     try {
       const response = await getAnansiProfile(accessToken);
-      if (isMountedRef.current) {
-        applyProfile(response);
+      if (isCurrentRequest()) {
+        applyProfile(
+          response,
+          shouldApplyResumeState &&
+            resumeUploadRequestRef.current === resumeUploadRequestId,
+        );
       }
     } catch {
-      if (isMountedRef.current) {
+      if (isCurrentRequest()) {
         setErrorMessage(
           "Couldn't load your saved onboarding progress. Please try again.",
         );
       }
     } finally {
-      if (isMountedRef.current) {
+      if (isCurrentRequest()) {
         setIsLoadingProfile(false);
       }
     }
   }, [accessToken, applyProfile]);
 
   useEffect(() => {
-    isMountedRef.current = true;
-    loadProfile();
-    return () => {
-      isMountedRef.current = false;
-    };
+    void loadProfile();
   }, [loadProfile]);
 
-  const uploadResume = useCallback(
-    async (file: File) => {
-      if (!isDefined(accessToken)) {
+  useEffect(() => {
+    if (
+      resumeParseStatus !== 'processing' ||
+      resumeUploadInFlightRef.current ||
+      !isDefined(sessionIdentity)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollCount = 0;
+    const markTimedOut = () => {
+      cancelled = true;
+      setResumeParseStatus('failed');
+      setIsUploading(false);
+      setResumeUploadFailed(isDefined(resumeFile));
+      setErrorMessage(RESUME_PARSE_TIMEOUT_DETAIL);
+    };
+    const poll = async () => {
+      pollCount += 1;
+      const latestAccessToken = currentAccessTokenRef.current;
+      if (
+        cancelled ||
+        !isDefined(latestAccessToken) ||
+        currentSessionIdentityRef.current !== sessionIdentity
+      ) {
         return;
       }
 
+      const resumeUploadRequestId = resumeUploadRequestRef.current;
+      const shouldApplyResumeState = !resumeUploadInFlightRef.current;
+      let observedStatus: ResumeParseStatus | undefined;
+      try {
+        const response = await getAnansiProfile(latestAccessToken);
+        if (
+          cancelled ||
+          currentSessionIdentityRef.current !== sessionIdentity
+        ) {
+          return;
+        }
+        const status = getResumeParseStatus(response);
+        const baselineVersion = resumeUploadBaselineVersionRef.current;
+        const requiredVersion =
+          baselineVersion === undefined
+            ? undefined
+            : (baselineVersion ?? 0) + (status === 'processing' ? 1 : 2);
+        const belongsToCurrentUpload =
+          requiredVersion === undefined ||
+          (status !== 'missing' &&
+            response.version !== null &&
+            response.version >= requiredVersion);
+        if (belongsToCurrentUpload) {
+          observedStatus = status;
+          applyProfile(
+            response,
+            shouldApplyResumeState &&
+              resumeUploadRequestRef.current === resumeUploadRequestId,
+          );
+        }
+      } catch {
+        // A temporary read failure must not lose durable extraction recovery.
+      }
+
+      if (cancelled) {
+        return;
+      }
+      if (isDefined(observedStatus) && observedStatus !== 'processing') {
+        cancelled = true;
+        resumeUploadBaselineVersionRef.current = undefined;
+        if (isDefined(deadlineTimer)) {
+          clearTimeout(deadlineTimer);
+        }
+        return;
+      }
+      if (pollCount >= MAX_RESUME_STATUS_POLLS) {
+        markTimedOut();
+        return;
+      }
+      timer = setTimeout(poll, RESUME_STATUS_POLL_MS);
+    };
+
+    timer = setTimeout(poll, RESUME_STATUS_POLL_MS);
+    deadlineTimer = setTimeout(
+      markTimedOut,
+      RESUME_STATUS_POLL_MS * (MAX_RESUME_STATUS_POLLS + 1),
+    );
+    return () => {
+      cancelled = true;
+      if (isDefined(timer)) {
+        clearTimeout(timer);
+      }
+      if (isDefined(deadlineTimer)) {
+        clearTimeout(deadlineTimer);
+      }
+    };
+  }, [
+    applyProfile,
+    resumeParseStatus,
+    resumeRecoveryGeneration,
+    resumeFile,
+    sessionIdentity,
+  ]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      profileRequestRef.current += 1;
+      finishRequestRef.current += 1;
+      resumeUploadRequestRef.current += 1;
+      resumeUploadInFlightRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentSessionIdentityRef.current === sessionIdentity) {
+      return;
+    }
+
+    finishRequestRef.current += 1;
+    setIsSavingRoles(false);
+    setIsFinishing(false);
+
+    resumeUploadRequestRef.current += 1;
+    resumeUploadInFlightRef.current = false;
+    resumeUploadBaselineVersionRef.current = undefined;
+    currentProfileVersionRef.current = null;
+    setIsUploading(false);
+    currentSessionIdentityRef.current = sessionIdentity;
+    setStepIndex(0);
+    setIsLoadingProfile(isDefined(accessToken));
+    setErrorMessage(undefined);
+    setResumeUploadFailed(false);
+    setResumeReady(false);
+    setResumeParseStatus('missing');
+    setResumeFile(undefined);
+    setUploadedFilename(undefined);
+    setTargetRoles([]);
+    setRoleDraft('');
+    setWorkMode(undefined);
+    setLocationModel(undefined);
+    setTimezoneRangeStart('');
+    setTimezoneRangeEnd('');
+    setCity('');
+    setRadiusMiles('100');
+    setEducationOnResume(false);
+    setFluffLevel('balanced');
+    setApprovedClaims('');
+    setTimezone(getDefaultTimezone());
+    setAwakeHours(DEFAULT_AWAKE_HOURS);
+    setPolicyDraft({});
+    setMeDraft(undefined);
+  }, [accessToken, sessionIdentity]);
+
+  const uploadResume = useCallback(
+    async (file: File) => {
+      if (
+        !isDefined(accessToken) ||
+        !isDefined(sessionIdentity) ||
+        resumeUploadInFlightRef.current
+      ) {
+        return;
+      }
+
+      const requestId = resumeUploadRequestRef.current + 1;
+      resumeUploadRequestRef.current = requestId;
+      resumeUploadInFlightRef.current = true;
+      resumeUploadBaselineVersionRef.current = currentProfileVersionRef.current;
+      const requestSessionIdentity = sessionIdentity;
+      const isCurrentRequest = () =>
+        isMountedRef.current &&
+        currentSessionIdentityRef.current === requestSessionIdentity &&
+        resumeUploadRequestRef.current === requestId;
       setIsUploading(true);
+      setResumeReady(false);
+      setResumeParseStatus('processing');
       setResumeUploadFailed(false);
       setErrorMessage(undefined);
       setUploadedFilename(undefined);
       try {
-        await postAnansiResume(accessToken, file);
-        if (!isMountedRef.current) {
+        const uploadResponse = await postAnansiResume(accessToken, file);
+        if (!isCurrentRequest()) {
           return;
         }
+        currentProfileVersionRef.current = Math.max(
+          currentProfileVersionRef.current ?? 0,
+          uploadResponse.profile_version,
+        );
+        resumeUploadBaselineVersionRef.current = undefined;
         setResumeReady(true);
+        setResumeParseStatus('ready');
+        setResumeUploadFailed(false);
+        setErrorMessage(undefined);
         setUploadedFilename(file.name);
 
+        const latestAccessToken = currentAccessTokenRef.current;
+        if (!isDefined(latestAccessToken)) {
+          return;
+        }
         try {
-          const refreshedProfile = await getAnansiProfile(accessToken);
-          if (isMountedRef.current) {
-            applyProfile(refreshedProfile);
+          const refreshedProfile = await getAnansiProfile(latestAccessToken);
+          if (isCurrentRequest()) {
+            applyProfile(refreshedProfile, false);
           }
         } catch {
-          if (isMountedRef.current) {
+          if (isCurrentRequest()) {
             setErrorMessage(
               "Resume received, but we couldn't load suggested roles. You can add them on the next step.",
             );
           }
         }
-      } catch {
-        if (isMountedRef.current) {
-          setResumeUploadFailed(true);
-          setErrorMessage("Couldn't upload /v1/resume. Please try again.");
+      } catch (error: unknown) {
+        if (isCurrentRequest()) {
+          if (error instanceof AnansiApiError && error.status === 409) {
+            // The competing upload may already own its processing Profile write.
+            // Step back one version so its terminal write is accepted, while the
+            // currently observed old ready Profile still is not.
+            const baselineVersion = resumeUploadBaselineVersionRef.current;
+            if (typeof baselineVersion === 'number') {
+              resumeUploadBaselineVersionRef.current = Math.max(
+                0,
+                baselineVersion - 1,
+              );
+            }
+          }
+          if (resumeUploadMayStillBeRunning(error)) {
+            setResumeParseStatus('processing');
+            setResumeRecoveryGeneration((current) => current + 1);
+            setResumeUploadFailed(false);
+            setErrorMessage(undefined);
+          } else {
+            setResumeParseStatus('failed');
+            setResumeUploadFailed(true);
+            setErrorMessage(
+              error instanceof AnansiApiError && isDefined(error.detail)
+                ? error.detail
+                : "Couldn't upload your resume. Please try again.",
+            );
+          }
         }
       } finally {
-        if (isMountedRef.current) {
+        if (isCurrentRequest()) {
+          resumeUploadInFlightRef.current = false;
           setIsUploading(false);
         }
       }
     },
-    [accessToken, applyProfile],
+    [accessToken, applyProfile, sessionIdentity],
   );
 
   const handleResumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -399,26 +744,34 @@ export const AnansiWizard = () => {
   };
 
   const saveRolesAndContinue = async () => {
-    if (!isDefined(accessToken) || targetRoles.length === 0) {
+    if (
+      !isDefined(accessToken) ||
+      !isDefined(sessionIdentity) ||
+      targetRoles.length === 0
+    ) {
       return;
     }
 
+    const requestSessionIdentity = sessionIdentity;
+    const isCurrentRequest = () =>
+      isMountedRef.current &&
+      currentSessionIdentityRef.current === requestSessionIdentity;
     setIsSavingRoles(true);
     setErrorMessage(undefined);
     try {
       const response = await patchAnansiProfile(accessToken, {
         target_roles: targetRoles,
       });
-      if (isMountedRef.current) {
+      if (isCurrentRequest()) {
         applyProfile(response);
         setStepIndex(2);
       }
     } catch {
-      if (isMountedRef.current) {
+      if (isCurrentRequest()) {
         setErrorMessage("Couldn't save /v1/profile. Please try again.");
       }
     } finally {
-      if (isMountedRef.current) {
+      if (isCurrentRequest()) {
         setIsSavingRoles(false);
       }
     }
@@ -506,33 +859,73 @@ export const AnansiWizard = () => {
   };
 
   const finish = async () => {
-    if (!isDefined(accessToken) || isFinishing) {
+    if (!isDefined(accessToken) || !isDefined(sessionIdentity) || isFinishing) {
       return;
     }
 
+    const requestId = finishRequestRef.current + 1;
+    finishRequestRef.current = requestId;
+    const requestSessionIdentity = sessionIdentity;
+    const isCurrentRequest = () =>
+      isMountedRef.current &&
+      currentSessionIdentityRef.current === requestSessionIdentity &&
+      finishRequestRef.current === requestId;
+    const getCurrentAccessToken = () =>
+      isCurrentRequest() ? currentAccessTokenRef.current : undefined;
     setIsFinishing(true);
     setErrorMessage(undefined);
     let failedCall = 'GET /v1/policy';
 
     try {
-      const freshPolicy = await getAnansiPolicy(accessToken);
+      let requestAccessToken = getCurrentAccessToken();
+      if (!isDefined(requestAccessToken)) {
+        return;
+      }
+      const freshPolicy = await getAnansiPolicy(requestAccessToken);
+      if (!isCurrentRequest()) {
+        return;
+      }
 
+      requestAccessToken = getCurrentAccessToken();
+      if (!isDefined(requestAccessToken)) {
+        return;
+      }
       failedCall = 'PUT /v1/policy';
-      await putAnansiPolicy(accessToken, {
+      await putAnansiPolicy(requestAccessToken, {
         ...freshPolicy.policy,
         ...policyDraft,
       });
-
-      if (isDefined(meDraft)) {
-        failedCall = 'PATCH /v1/me';
-        await patchAnansiMe(accessToken, meDraft);
+      if (!isCurrentRequest()) {
+        return;
       }
 
+      if (isDefined(meDraft)) {
+        requestAccessToken = getCurrentAccessToken();
+        if (!isDefined(requestAccessToken)) {
+          return;
+        }
+        failedCall = 'PATCH /v1/me';
+        await patchAnansiMe(requestAccessToken, meDraft);
+        if (!isCurrentRequest()) {
+          return;
+        }
+      }
+
+      requestAccessToken = getCurrentAccessToken();
+      if (!isDefined(requestAccessToken)) {
+        return;
+      }
       failedCall = 'POST /v1/onboarding/complete';
-      await postAnansiOnboardingComplete(accessToken);
+      await postAnansiOnboardingComplete(requestAccessToken);
+      if (!isCurrentRequest()) {
+        return;
+      }
 
       failedCall = 'completeAnansiWizardOnboardingStep';
       const result = await completeWizardMutation();
+      if (!isCurrentRequest()) {
+        return;
+      }
       if (result.data?.completeAnansiWizardOnboardingStep.success !== true) {
         throw new Error('Wizard mutation did not succeed');
       }
@@ -543,7 +936,7 @@ export const AnansiWizard = () => {
         stepHistoryEffect: 'clearAfterIrreversibleStep',
       });
     } catch (error) {
-      if (!isMountedRef.current) {
+      if (!isCurrentRequest()) {
         return;
       }
       if (
@@ -602,12 +995,16 @@ export const AnansiWizard = () => {
             id="anansi-resume-upload"
             type="file"
             accept=".pdf,application/pdf"
-            disabled={isUploading}
+            disabled={isUploading || resumeParseStatus === 'processing'}
             onChange={handleResumeChange}
           />
-          {isUploading && (
+          {(isUploading || resumeParseStatus === 'processing') && (
             <StyledLoaderRow>
               <Loader color="gray" />
+              <span>
+                Uploading and extracting your resume… This can take up to five
+                minutes.
+              </span>
             </StyledLoaderRow>
           )}
           {resumeReady && (
@@ -615,11 +1012,14 @@ export const AnansiWizard = () => {
               Resume received{uploadedFilename ? ` — ${uploadedFilename}` : ''}
             </StyledSuccess>
           )}
-          {errorMessage && resumeUploadFailed && isDefined(resumeFile) && !isUploading && (
-            <StyledTextButton onClick={() => uploadResume(resumeFile)}>
-              Retry upload
-            </StyledTextButton>
-          )}
+          {errorMessage &&
+            resumeUploadFailed &&
+            isDefined(resumeFile) &&
+            !isUploading && (
+              <StyledTextButton onClick={() => uploadResume(resumeFile)}>
+                Retry upload
+              </StyledTextButton>
+            )}
           {errorMessage && !resumeUploadFailed && (
             <StyledTextButton onClick={loadProfile}>Retry</StyledTextButton>
           )}
@@ -650,7 +1050,9 @@ export const AnansiWizard = () => {
               title="Add"
               variant="secondary"
               width={72}
-              disabled={roleDraft.trim().length === 0 || targetRoles.length >= 20}
+              disabled={
+                roleDraft.trim().length === 0 || targetRoles.length >= 20
+              }
               onClick={addRole}
             />
           </StyledInputRow>
@@ -778,7 +1180,9 @@ export const AnansiWizard = () => {
       return (
         <>
           <StyledToggleRow>
-            <label id="education-on-resume-label">Show education on resume</label>
+            <label id="education-on-resume-label">
+              Show education on resume
+            </label>
             <Toggle
               aria-labelledby="education-on-resume-label"
               value={educationOnResume}
@@ -851,7 +1255,9 @@ export const AnansiWizard = () => {
 
     return (
       <StyledPlanList>
-        <li>Anansi hunts and prepares applications at full speed from day one.</li>
+        <li>
+          Anansi hunts and prepares applications at full speed from day one.
+        </li>
         <li>
           For the first stretch, YOU approve everything before it goes out —
           every application, every reply.

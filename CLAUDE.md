@@ -6,6 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Twenty is an open-source CRM built with modern technologies in a monorepo structure. The codebase is organized as an Nx workspace with multiple packages.
 
+## Anansi Fresh-Login and Resume Hotfix (2026-08-28, PUSHED, NOT DEPLOYED)
+
+Standing project authorization requires committing and pushing completed Anansi
+work without asking for separate approval. It does not authorize merge,
+deployment, OAuth consent, browser use, email sends, application submission, or
+account-data mutation.
+
+Clean branch `fix/onboarding-resume-auth-hotfix` is based on deployed fork
+commit `dfe5171131`. SSO redemption synchronously disables cookie auth and clears
+the old token pair plus user/workspace/member metadata. It finishes one shared
+single-flight server sign-out before exchange, so a delayed old response cannot
+delete the new friend's cookie; failed sign-out never exchanges. Pending
+sign-out recovery also clears any retained client identity before its server
+retry. An initial SSO exchange suppresses automatic redirects from both public
+workspace data and the shared previous-workspace cookie, so a friend cannot land
+in `pran`. Cookie and metadata generation fences reject old in-flight work,
+including React StrictMode effect replay. The wizard binds Profile, resume
+upload/status, role-save, and Finish work to stable JWT
+`userId:workspaceId`; same-session bearer rotation remains valid and later REST
+calls use the newest token, while an identity change clears state and invalidates
+older requests. Durable `processing|ready|failed` resume status supports reload,
+ambiguous upload response, HTTP 409, and hung-read recovery. Capacity HTTP 503
+stays a retryable upload error instead of false processing recovery.
+Profile-version baselines prevent an old ready Profile from completing a newer
+replacement; a timed-out retry that joins an existing upload accepts its exact
+terminal version. Frontend legacy readiness matches Core for nonblank markdown
+and rejects blank PDF references. Terminal status on the last allowed poll wins,
+and timeout keeps the selected file available through `Retry upload`. Focused
+proof passes 6 suites and 59 tests. Complete `twenty-front` passes 1,055 suites,
+6,487 tests, and 139 snapshots. Frontend typecheck, type-aware Oxlint with zero
+warnings, Oxfmt, diff, and scoped Gitleaks pass. Temporary dependency link was
+removed. Companion Core branch `fix/onboarding-resume-hotfix-core` passes 837
+tests with 3 expected skips under forced RLS plus clean migrations, Alembic
+parity, classifier, Ruff, diff, and secret gates. This branch is committed and
+pushed under standing project authorization. No PR, merge, image build,
+deployment, OAuth flow, browser launch, or account-data change occurred. Live images remain unchanged. A missing supported Last Contact
+kill-switch key was restored with `stop` plus `PERSIST`; TTL is `-1`, and the next
+cron boundary was clean. Deployed fresh-user proof is still required.
+
 ## Anansi Fork Status (2026-08-23)
 
 Work only from Morona repo `/home/pran/Developer/anansi-twenty`. Current local

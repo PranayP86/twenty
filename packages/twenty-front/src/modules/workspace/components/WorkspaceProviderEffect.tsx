@@ -3,7 +3,7 @@ import { useReadWorkspaceUrlFromCurrentLocation } from '@/domain-manager/hooks/u
 import { useRedirectToWorkspaceDomain } from '@/domain-manager/hooks/useRedirectToWorkspaceDomain';
 import { lastAuthenticatedWorkspaceDomainState } from '@/domain-manager/states/lastAuthenticatedWorkspaceDomainState';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 
 import { useInitializeQueryParamState } from '@/app/hooks/useInitializeQueryParamState';
 import { useGetPublicWorkspaceDataByDomain } from '@/domain-manager/hooks/useGetPublicWorkspaceDataByDomain';
@@ -16,6 +16,11 @@ const getCurrentSearchParams = (): Record<string, string> =>
   Object.fromEntries(new URLSearchParams(window.location.search));
 
 export const WorkspaceProviderEffect = () => {
+  const [didStartWithSSOExchangeToken] = useState(() =>
+    new URLSearchParams(window.location.hash.substring(1)).has(
+      'ssoExchangeToken',
+    ),
+  );
   const { data: getPublicWorkspaceData } = useGetPublicWorkspaceDataByDomain();
 
   const lastAuthenticatedWorkspaceDomain = useAtomStateValue(
@@ -44,6 +49,7 @@ export const WorkspaceProviderEffect = () => {
   useEffect(() => {
     if (
       isMultiWorkspaceEnabled &&
+      !didStartWithSSOExchangeToken &&
       isDefined(getPublicWorkspaceData) &&
       !isWorkspaceHostnameMatchCurrentLocationHostname(
         getPublicWorkspaceData.workspaceUrls,
@@ -57,6 +63,7 @@ export const WorkspaceProviderEffect = () => {
     }
   }, [
     isMultiWorkspaceEnabled,
+    didStartWithSSOExchangeToken,
     redirectToWorkspaceDomain,
     getPublicWorkspaceData,
     currentLocationHostname,
@@ -67,6 +74,7 @@ export const WorkspaceProviderEffect = () => {
     if (
       isMultiWorkspaceEnabled &&
       isDefaultDomain &&
+      !didStartWithSSOExchangeToken &&
       isDefined(lastAuthenticatedWorkspaceDomain) &&
       'workspaceUrl' in lastAuthenticatedWorkspaceDomain &&
       isDefined(lastAuthenticatedWorkspaceDomain?.workspaceUrl)
@@ -81,6 +89,7 @@ export const WorkspaceProviderEffect = () => {
   }, [
     isMultiWorkspaceEnabled,
     isDefaultDomain,
+    didStartWithSSOExchangeToken,
     lastAuthenticatedWorkspaceDomain,
     redirectToWorkspaceDomain,
     initializeQueryParamState,
