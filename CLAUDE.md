@@ -55,19 +55,29 @@ only owner account/workspace `pran` and the approved `praniapx@gmail.com`
 allowlist entry. Deployed fresh-user login and authenticated resume proof remain
 required.
 
-**Skipped provisioning recovery (2026-08-28, LOCAL):** Live proof created active
-friend workspace `powerful-purple-falcon`, but no Core user. Core received valid
-CORS and Twenty metadata calls, then returned 401 from Profile and resume because
-`/v1/provision` never arrived. The Anansi wizard now treats its initial Profile
-401 as a recoverable missing-provision state: it calls idempotent
-`POST /v1/provision` with the current workspace bearer, then requires a successful
-Profile read. It still reads Profile after an ambiguous provision response, so a
-lost response cannot hide a committed repair. The provision request has a
-90-second client deadline, so a hung connection cannot keep onboarding loading
-forever before that Profile proof. Stale identity checks remain in force. The new
-tests failed before production code, then passed; the six focused auth/onboarding
-suites pass 64 tests. Frontend typecheck, type-aware Oxlint with zero warnings,
-targeted Oxfmt, and diff checks pass. Release is pending.
+**Skipped provisioning recovery (2026-08-28, LIVE; AUTHENTICATED PROOF
+PENDING):** Live proof created active friend workspace
+`powerful-purple-falcon`, but no Core user. Core received valid CORS and Twenty
+metadata calls, then returned 401 from Profile and resume because `/v1/provision`
+never arrived. Source `741a697c9a` repairs initial Profile 401 through idempotent
+`POST /v1/provision` while polling Profile without waiting for slower
+view/dashboard bootstrap. It permits onboarding from a saved PDF and extracted
+text when fact extraction ends in `failed`. Every background provisioning failure
+is visible with a dedicated retry; Profile polling reaches the provision
+request's 90-second deadline, and manual retry reloads Profile concurrently with
+repair. Stable identity and request-generation fences reject older repair
+results; an in-flight marker prevents that concurrent Profile load from starting
+a duplicate repair. The complete wizard file passes 44 tests. Frontend typecheck,
+type-aware Oxlint with zero warnings, Oxfmt, diff, targeted Gitleaks, and three
+review passes are clean. GitHub test run `33206832364` and image run
+`33206832247` passed. Flux release manifest commit `2a6c5fa` deploys server and
+worker digest
+`sha256:6a520c1635419d3f43a70ab4ea6ddb9664e8f9e6aab93c4364f53c035b864bc0`;
+both deployments are Ready. `/welcome` is 200, Google auth redirects 302, and
+unauthenticated Profile/resume remain 401. Last Contact `stop` plus `PERSIST`
+restored TTL `-1`; the 20:30Z cron boundary had zero server/worker errors and
+zero Last Contact matches, and TTL remained `-1`. Authenticated browser
+continuation and completed onboarding proof remain pending.
 
 ## Anansi Fork Status (2026-08-23)
 
