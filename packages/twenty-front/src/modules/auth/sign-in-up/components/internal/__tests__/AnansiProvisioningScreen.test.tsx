@@ -15,6 +15,7 @@ import { ThemeProvider } from 'twenty-ui/theme-constants';
 
 import { AnansiProvisioningScreen } from '@/auth/sign-in-up/components/internal/AnansiProvisioningScreen';
 import { currentUserState } from '@/auth/states/currentUserState';
+import { tokenPairState } from '@/auth/states/tokenPairState';
 import { isMultiWorkspaceEnabledState } from '@/client-config/states/isMultiWorkspaceEnabledState';
 import {
   jotaiStore,
@@ -247,27 +248,50 @@ describe('AnansiProvisioningScreen', () => {
     );
   });
 
-  it('returns to sign-in when the original login token expires before any exchange succeeds', async () => {
+  it('refreshes an expired original login token with the retained central token pair without another Google sign-in', async () => {
+    const centralTokenPair = buildAuthTokensResult(
+      'central-access-token',
+      'central-refresh-token',
+    ).data.getAuthTokensFromLoginToken.tokens;
+    jotaiStore.set(tokenPairState.atom, centralTokenPair);
     signUpInNewWorkspaceMock.mockResolvedValue(
       buildSignUpInNewWorkspaceResult('2000-01-01T00:00:00.000Z'),
-    );
-    getAuthTokensFromLoginTokenMock.mockRejectedValue(
-      new Error('login token expired'),
     );
     const fetchMock = mockFetchResponses({ ok: true });
 
     renderScreen();
 
     await waitFor(() => {
-      expect(signInWithGoogleMock).toHaveBeenCalledWith({
-        action: 'list-available-workspaces',
+      expect(signInWithGoogleMock).not.toHaveBeenCalled();
+      expect(apolloClientQueryMock).toHaveBeenCalledWith({
+        query: GetCurrentUserDocument,
+        fetchPolicy: 'network-only',
+        context: {
+          skipAuthToken: true,
+          headers: { authorization: 'Bearer central-access-token' },
+        },
       });
     });
 
+    await waitFor(() => {
+      expect(redirectToWorkspaceDomainMock).toHaveBeenCalledWith(
+        WORKSPACE_URL,
+        AppPath.Verify,
+        { loginToken: 'fresh-login-token' },
+        '_self',
+      );
+    });
+
     expect(signUpInNewWorkspaceMock).toHaveBeenCalledTimes(1);
-    expect(activateWorkspaceMock).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(redirectToWorkspaceDomainMock).not.toHaveBeenCalled();
+    expect(signInWithGoogleMock).not.toHaveBeenCalled();
+    expect(getAuthTokensFromLoginTokenMock).toHaveBeenCalledWith({
+      variables: {
+        loginToken: 'fresh-login-token',
+        origin: WORKSPACE_URL,
+      },
+    });
+    expect(activateWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes an expired login token from the saved workspace access token', async () => {

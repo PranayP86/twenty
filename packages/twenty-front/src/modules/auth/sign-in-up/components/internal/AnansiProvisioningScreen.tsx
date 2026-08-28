@@ -8,8 +8,8 @@ import { ANANSI_API_URL } from '@/auth/constants/AnansiApiUrl';
 import { SubTitle } from '@/auth/components/SubTitle';
 import { Title } from '@/auth/components/Title';
 import { renewToken } from '@/auth/services/AuthService';
-import { useSignInWithGoogle } from '@/auth/sign-in-up/hooks/useSignInWithGoogle';
 import { currentUserState } from '@/auth/states/currentUserState';
+import { tokenPairState } from '@/auth/states/tokenPairState';
 import { isCreatingWorkspaceState } from '@/auth/states/isCreatingWorkspaceState';
 import { isMultiWorkspaceEnabledState } from '@/client-config/states/isMultiWorkspaceEnabledState';
 import { useRedirectToWorkspaceDomain } from '@/domain-manager/hooks/useRedirectToWorkspaceDomain';
@@ -146,12 +146,12 @@ const provisionWorkspaceWithSilentRetry = async (
 export const AnansiProvisioningScreen = () => {
   const { t } = useLingui();
   const currentUser = useAtomStateValue(currentUserState);
+  const tokenPair = useAtomStateValue(tokenPairState);
   const isMultiWorkspaceEnabled = useAtomStateValue(
     isMultiWorkspaceEnabledState,
   );
   const setIsCreatingWorkspace = useSetAtomState(isCreatingWorkspaceState);
   const { redirectToWorkspaceDomain } = useRedirectToWorkspaceDomain();
-  const { signInWithGoogle } = useSignInWithGoogle();
   const apolloClient = useApolloClient();
 
   const [signUpInNewWorkspaceMutation] = useMutation(
@@ -251,10 +251,6 @@ export const AnansiProvisioningScreen = () => {
       }
 
       if (!isDefined(retryContext.tokenPair)) {
-        if (loginTokenIsExpired) {
-          signInWithGoogle({ action: 'list-available-workspaces' });
-        }
-
         return undefined;
       }
 
@@ -295,7 +291,7 @@ export const AnansiProvisioningScreen = () => {
 
       return refreshedTokenPair;
     },
-    [exchangeLoginToken, getFreshLoginToken, signInWithGoogle],
+    [exchangeLoginToken, getFreshLoginToken],
   );
 
   const activateNewWorkspace = useCallback(
@@ -371,6 +367,7 @@ export const AnansiProvisioningScreen = () => {
 
         const { workspace, loginToken } = data.signUpInNewWorkspace;
         const workspaceUrl = getWorkspaceUrl(workspace.workspaceUrls);
+        let loginTokenForRedirect = loginToken.token;
 
         if (isMultiWorkspaceEnabled) {
           // ANANSI PATCH (WS-C): save the created workspace before exchanging
@@ -380,14 +377,15 @@ export const AnansiProvisioningScreen = () => {
           const retryContext: ProvisioningRetryContext = {
             loginToken: loginToken.token,
             loginTokenExpiresAt: loginToken.expiresAt,
+            tokenPair: tokenPair ?? undefined,
             workspaceId: workspace.id,
             workspaceUrl,
           };
           provisionRetryContextRef.current = retryContext;
 
-          const tokenPair = await getCurrentTokenPair(retryContext);
+          const workspaceTokenPair = await getCurrentTokenPair(retryContext);
 
-          if (!isDefined(tokenPair)) {
+          if (!isDefined(workspaceTokenPair)) {
             if (isMountedRef.current) {
               setIsCreatingWorkspace(false);
               setPhase('provisionError');
@@ -395,8 +393,9 @@ export const AnansiProvisioningScreen = () => {
             return;
           }
 
-          retryContext.tokenPair = tokenPair;
-          const accessToken = tokenPair.accessOrWorkspaceAgnosticToken.token;
+          retryContext.tokenPair = workspaceTokenPair;
+          const accessToken =
+            workspaceTokenPair.accessOrWorkspaceAgnosticToken.token;
 
           const isActivated = await activateNewWorkspace(accessToken);
 
@@ -425,13 +424,15 @@ export const AnansiProvisioningScreen = () => {
             setPhase('provisionError');
             return;
           }
+
+          loginTokenForRedirect = retryContext.loginToken;
         }
 
         if (isMultiWorkspaceEnabled) {
           await redirectToWorkspaceDomain(
             workspaceUrl,
             AppPath.Verify,
-            { loginToken: loginToken.token },
+            { loginToken: loginTokenForRedirect },
             '_self',
           );
         }
@@ -470,6 +471,7 @@ export const AnansiProvisioningScreen = () => {
     redirectToWorkspaceDomain,
     setIsCreatingWorkspace,
     signUpInNewWorkspaceMutation,
+    tokenPair,
   ]);
 
   const handleRetry = () => {
