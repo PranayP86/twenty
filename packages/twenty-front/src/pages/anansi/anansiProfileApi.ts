@@ -5,6 +5,10 @@
 // GraphQL API, same pattern as AnansiProvisioningScreen's `/v1/provision`
 // call.
 import { ANANSI_API_URL } from '@/auth/constants/AnansiApiUrl';
+import { ensureTokenRenewed } from '@/auth/utils/ensureTokenRenewed';
+import { tokenPairState } from '@/auth/states/tokenPairState';
+import { jotaiStore } from '@/ui/utilities/state/jotai/jotaiStore';
+import { isDefined } from 'twenty-shared/utils';
 
 export type AnansiAwakeHours = {
   start: string;
@@ -131,19 +135,54 @@ const getAnansiApiError = async (
   return new AnansiApiError(path, response.status);
 };
 
+// ANANSI PATCH: Core is a separate REST service reached with the signed-in
+// user's Twenty access token. Those tokens expire after 30 minutes
+// (ACCESS_TOKEN_EXPIRES_IN) and are only refreshed reactively inside Apollo's
+// error link on GraphQL calls -- a path these plain `fetch` calls never take.
+// Without this, a wizard or Profile page that sits past the access-token
+// lifetime sends a dead bearer, every Core call fails 401 with no recovery,
+// and the wizard misreads that 401 as "workspace not provisioned". Mirror
+// Apollo: on a 401, renew once through the shared single-flight renewer and
+// retry with the fresh token from state. Idempotent Core routes make the one
+// retry safe.
+const anansiFetchWithRenew = async (
+  accessToken: string,
+  attempt: (token: string) => Promise<Response>,
+): Promise<Response> => {
+  const response = await attempt(accessToken);
+  if (response.status !== 401) {
+    return response;
+  }
+
+  const renewed = await ensureTokenRenewed(jotaiStore);
+  if (!renewed) {
+    return response;
+  }
+
+  const freshToken = jotaiStore.get(tokenPairState.atom)
+    ?.accessOrWorkspaceAgnosticToken.token;
+  if (!isDefined(freshToken) || freshToken === accessToken) {
+    return response;
+  }
+
+  return attempt(freshToken);
+};
+
 const anansiApiRequest = async <T>(
   path: string,
   accessToken: string,
   init?: RequestInit,
 ): Promise<T> => {
-  const response = await fetch(`${ANANSI_API_URL}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+  const response = await anansiFetchWithRenew(accessToken, (token) =>
+    fetch(`${ANANSI_API_URL}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    }),
+  );
 
   if (!response.ok) {
     throw await getAnansiApiError(path, response);
@@ -152,9 +191,7 @@ const anansiApiRequest = async <T>(
   return response.json() as Promise<T>;
 };
 
-export const getAnansiMe = (
-  accessToken: string,
-): Promise<AnansiMeResponse> =>
+export const getAnansiMe = (accessToken: string): Promise<AnansiMeResponse> =>
   anansiApiRequest<AnansiMeResponse>('/v1/me', accessToken);
 
 export const patchAnansiMe = (
@@ -226,9 +263,8 @@ const patchAnansiTourSeenOrdered = async (
     }
     tourStateRevision = expectedRevision;
   } else {
-    tourStateRevision = (
-      await getAnansiMeWithTimeout(accessToken)
-    ).tour_state_revision;
+    tourStateRevision = (await getAnansiMeWithTimeout(accessToken))
+      .tour_state_revision;
   }
 
   try {
@@ -333,14 +369,19 @@ export const patchAnansiProfile = (
 export const postAnansiResume = async (
   accessToken: string,
   file: File,
-): Promise<{ ok: boolean; profile_version: number; parsed: unknown | null }> => {
-  const body = new FormData();
-  body.append('file', file);
-
-  const response = await fetch(`${ANANSI_API_URL}/v1/resume`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body,
+): Promise<{
+  ok: boolean;
+  profile_version: number;
+  parsed: unknown | null;
+}> => {
+  const response = await anansiFetchWithRenew(accessToken, (token) => {
+    const body = new FormData();
+    body.append('file', file);
+    return fetch(`${ANANSI_API_URL}/v1/resume`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+    });
   });
 
   if (!response.ok) {

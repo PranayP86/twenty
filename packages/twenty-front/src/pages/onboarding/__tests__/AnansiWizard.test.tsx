@@ -36,6 +36,15 @@ jest.mock('@/auth/hooks/useAuth', () => ({
   useAuth: () => ({ signOut: mockSignOut }),
 }));
 
+// ANANSI PATCH: the Core REST client renews the access token once on a 401 and
+// retries. These tests exercise provisioning repair given a persistent 401
+// (token valid, no Core user row), so hold renewal to a deterministic no-op --
+// otherwise the real renewer fires a /metadata mutation against the path-router
+// fetch mock and perturbs call counts.
+jest.mock('@/auth/utils/ensureTokenRenewed', () => ({
+  ensureTokenRenewed: jest.fn(() => Promise.resolve(false)),
+}));
+
 jest.mock('@/onboarding/hooks/useGoBackToPreviousOnboardingStep', () => ({
   useGoBackToPreviousOnboardingStep: () => ({
     goBackToPreviousOnboardingStep: mockGoBackToPreviousOnboardingStep,
