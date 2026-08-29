@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { ApiKeyEntity } from 'src/engine/core-modules/api-key/api-key.entity';
+import { AnansiApiKeyAdminSafetyService } from 'src/engine/core-modules/api-key/services/anansi-api-key-admin-safety.service';
 import { ApiKeyRoleService } from 'src/engine/core-modules/api-key/services/api-key-role.service';
 import { ApplicationEntity } from 'src/engine/core-modules/application/application.entity';
 import { FeatureFlagModule } from 'src/engine/core-modules/feature-flag/feature-flag.module';
@@ -30,6 +31,7 @@ import { WorkspaceCacheModule } from 'src/engine/workspace-cache/workspace-cache
   ],
   providers: [
     ApiKeyRoleService,
+    AnansiApiKeyAdminSafetyService,
     PermissionsService,
     provideWorkspaceScopedRepository(ApiKeyEntity),
     provideWorkspaceScopedRepository(RoleEntity),

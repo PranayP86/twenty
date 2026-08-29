@@ -4,6 +4,11 @@ import { WorkspaceMigrationRunnerActionHandler } from 'src/engine/workspace-mana
 
 import { PageLayoutWidgetEntity } from 'src/engine/metadata-modules/page-layout-widget/entities/page-layout-widget.entity';
 import {
+  PageLayoutWidgetException,
+  PageLayoutWidgetExceptionCode,
+} from 'src/engine/metadata-modules/page-layout-widget/exceptions/page-layout-widget.exception';
+import { computePageLayoutWidgetStateFingerprint } from 'src/engine/metadata-modules/page-layout-widget/utils/compute-page-layout-widget-state-fingerprint.util';
+import {
   FlatDeletePageLayoutWidgetAction,
   UniversalDeletePageLayoutWidgetAction,
 } from 'src/engine/workspace-manager/workspace-migration/workspace-migration-builder/builders/page-layout-widget/types/workspace-migration-page-layout-widget-action.type';
@@ -24,7 +29,10 @@ export class DeletePageLayoutWidgetActionHandlerService extends WorkspaceMigrati
   override async transpileUniversalActionToFlatAction(
     context: WorkspaceMigrationActionRunnerArgs<UniversalDeletePageLayoutWidgetAction>,
   ): Promise<FlatDeletePageLayoutWidgetAction> {
-    return this.transpileUniversalDeleteActionToFlatDeleteAction(context);
+    return {
+      ...this.transpileUniversalDeleteActionToFlatDeleteAction(context),
+      expectedStateFingerprint: context.action.expectedStateFingerprint,
+    };
   }
 
   async executeForMetadata(
@@ -36,6 +44,24 @@ export class DeletePageLayoutWidgetActionHandlerService extends WorkspaceMigrati
       queryRunner.manager.getRepository<PageLayoutWidgetEntity>(
         PageLayoutWidgetEntity,
       );
+
+    if (flatAction.expectedStateFingerprint !== undefined) {
+      const currentWidget = await pageLayoutWidgetRepository.findOne({
+        where: { id: flatAction.entityId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (
+        currentWidget === null ||
+        computePageLayoutWidgetStateFingerprint(currentWidget) !==
+          flatAction.expectedStateFingerprint
+      ) {
+        throw new PageLayoutWidgetException(
+          'Page layout widget changed before deletion',
+          PageLayoutWidgetExceptionCode.INVALID_PAGE_LAYOUT_WIDGET_DATA,
+        );
+      }
+    }
 
     await pageLayoutWidgetRepository.delete({ id: flatAction.entityId });
   }

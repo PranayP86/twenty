@@ -85,6 +85,9 @@ export class PageLayoutWidgetDTO {
   @Field()
   updatedAt: Date;
 
+  @Field({ nullable: true })
+  stateFingerprint?: string;
+
   @Field(() => Boolean, { nullable: false })
   isActive: boolean;
 

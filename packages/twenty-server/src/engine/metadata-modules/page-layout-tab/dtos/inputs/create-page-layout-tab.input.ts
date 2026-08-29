@@ -14,6 +14,11 @@ import { UUIDScalarType } from 'src/engine/api/graphql/workspace-schema-builder/
 
 @InputType()
 export class CreatePageLayoutTabInput {
+  @Field(() => UUIDScalarType, { nullable: true })
+  @IsUUID()
+  @IsOptional()
+  id?: string;
+
   @Field({ nullable: false })
   @IsString()
   @IsNotEmpty()

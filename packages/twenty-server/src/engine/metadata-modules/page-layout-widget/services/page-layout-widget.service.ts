@@ -67,10 +67,12 @@ export class PageLayoutWidgetService {
     workspaceId,
     operations,
     errorMessage,
+    expectedStateFingerprintByUniversalIdentifier,
   }: {
     workspaceId: string;
     operations: WidgetMigrationOperations;
     errorMessage: string;
+    expectedStateFingerprintByUniversalIdentifier?: Record<string, string>;
   }): Promise<void> {
     const { workspaceCustomFlatApplication } =
       await this.applicationService.findWorkspaceTwentyStandardAndCustomApplicationOrThrow(
@@ -83,6 +85,8 @@ export class PageLayoutWidgetService {
           allFlatEntityOperationByMetadataName: {
             pageLayoutWidget: operations,
           },
+          expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier:
+            expectedStateFingerprintByUniversalIdentifier,
           workspaceId,
           isSystemBuild: false,
           applicationUniversalIdentifier:
@@ -467,9 +471,11 @@ export class PageLayoutWidgetService {
   async destroy({
     id,
     workspaceId,
+    expectedStateFingerprint,
   }: {
     id: string;
     workspaceId: string;
+    expectedStateFingerprint?: string;
   }): Promise<boolean> {
     const existingFlatPageLayoutWidgetMaps =
       await this.getFlatPageLayoutWidgetMaps(workspaceId);
@@ -489,6 +495,13 @@ export class PageLayoutWidgetService {
       },
       errorMessage:
         'Multiple validation errors occurred while destroying page layout widget',
+      expectedStateFingerprintByUniversalIdentifier:
+        expectedStateFingerprint === undefined
+          ? undefined
+          : {
+              [flatPageLayoutWidgetToDestroy.universalIdentifier]:
+                expectedStateFingerprint,
+            },
     });
 
     await this.dashboardSyncService.updateLinkedDashboardsUpdatedAtByWidgetId({

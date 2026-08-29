@@ -20,6 +20,11 @@ import { AllPageLayoutWidgetConfiguration } from 'src/engine/metadata-modules/pa
 
 @InputType()
 export class CreatePageLayoutWidgetInput {
+  @Field(() => UUIDScalarType, { nullable: true })
+  @IsUUID()
+  @IsOptional()
+  id?: string;
+
   @Field(() => UUIDScalarType, { nullable: false })
   @IsUUID()
   @IsNotEmpty()

@@ -1,6 +1,12 @@
 import { i18n } from '@lingui/core';
 import { I18nProvider } from '@lingui/react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { Provider as JotaiProvider } from 'jotai';
 import { MemoryRouter } from 'react-router-dom';
 import { SOURCE_LOCALE } from 'twenty-shared/translations';
@@ -100,6 +106,12 @@ const buildPolicyResponse = (
   },
 });
 
+const buildGmailStatusResponse = () => ({
+  connections: [],
+  primary_connection_id: null,
+  main_application_email: null,
+});
+
 const jsonOk = (body: unknown) => ({
   ok: true,
   status: 200,
@@ -118,19 +130,38 @@ type MockResponse = ReturnType<typeof jsonOk> | ReturnType<typeof jsonError>;
 // GET /v1/policy (fired together via Promise.all, order not load-bearing)
 // don't have to line up sequentially, and each endpoint queues independently.
 const mockFetchRouter = (responses: Record<string, MockResponse[]>) => {
-  const fetchMock = jest.fn(
-    (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = (init?.method ?? 'GET').toUpperCase();
-      const path = url.replace(ANANSI_API_URL, '');
-      const key = `${method} ${path}`;
-      const queue = responses[key];
-      if (!queue || queue.length === 0) {
-        throw new Error(`Unmocked ANANSI fetch: ${key}`);
-      }
-      return Promise.resolve(queue.shift());
-    },
-  );
+  const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const path = url.replace(ANANSI_API_URL, '');
+    const key = `${method} ${path}`;
+    if (
+      key === 'GET /v1/connections/gmail/status' &&
+      responses[key] === undefined
+    ) {
+      return Promise.resolve(jsonOk(buildGmailStatusResponse()));
+    }
+    if (key === 'GET /v1/browser/devices' && responses[key] === undefined) {
+      return Promise.resolve(jsonOk([]));
+    }
+    if (key === 'GET /v1/browser/preferences' && responses[key] === undefined) {
+      return Promise.resolve(
+        jsonOk({
+          preferred_runtime: 'extension',
+          remote_fallback_enabled: false,
+          extension_state: 'unavailable',
+          remote_state: 'unavailable',
+          last_health_at: null,
+          version: 0,
+        }),
+      );
+    }
+    const queue = responses[key];
+    if (queue === undefined || queue.length === 0) {
+      throw new Error(`Unmocked ANANSI fetch: ${key}`);
+    }
+    return Promise.resolve(queue.shift());
+  });
   global.fetch = fetchMock as unknown as typeof fetch;
   return fetchMock;
 };
@@ -155,7 +186,7 @@ describe('AnansiProfilePage', () => {
     setTokenPair();
   });
 
-  it('renders all four sections from the mocked GET responses', async () => {
+  it('renders all five sections from the mocked GET responses', async () => {
     mockFetchRouter({
       'GET /v1/me': [jsonOk(buildMeResponse())],
       'GET /v1/policy': [jsonOk(buildPolicyResponse())],
@@ -169,12 +200,18 @@ describe('AnansiProfilePage', () => {
     expect(screen.getByText('Resume')).toBeInTheDocument();
     expect(screen.getByText('Search')).toBeInTheDocument();
     expect(screen.getByText('Availability')).toBeInTheDocument();
+    expect(screen.getByText('Gmail')).toBeInTheDocument();
+    expect(screen.getByText('Browser automation')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Connect Gmail' }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Pair this Chrome' }),
+    ).toBeInTheDocument();
 
     // Autonomy: applications is automation level 2 (on), replies is 1 (off).
     expect(screen.getByRole('switch', { name: 'Applications' })).toBeChecked();
-    expect(
-      screen.getByRole('switch', { name: 'Replies' }),
-    ).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Replies' })).not.toBeChecked();
 
     // Resume + Search reflect the mocked policy document.
     expect(
@@ -192,22 +229,83 @@ describe('AnansiProfilePage', () => {
     expect(screen.getByLabelText('Until')).toHaveValue('18:00');
   });
 
-  it('scheduling row has no interactive control', async () => {
-    mockFetchRouter({
+  it('scheduling is a real automation toggle', async () => {
+    const fetchMock = mockFetchRouter({
       'GET /v1/me': [jsonOk(buildMeResponse())],
       'GET /v1/policy': [jsonOk(buildPolicyResponse())],
+      'POST /v1/automation/scheduling': [
+        jsonOk({
+          applications: 2,
+          replies: 1,
+          negotiation: 1,
+          prescreen: 1,
+          scheduling: 2,
+          outreach: 1,
+        }),
+      ],
     });
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Scheduling')).toBeInTheDocument();
+    const scheduling = await screen.findByRole('switch', {
+      name: 'Scheduling',
+    });
+    expect(scheduling).not.toBeChecked();
+    fireEvent.click(scheduling);
+
+    await waitFor(() => expect(scheduling).toBeChecked());
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${ANANSI_API_URL}/v1/automation/scheduling`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ level: 2 }),
+      }),
+    );
+  });
+
+  it('sets every automation chunk through one versioned Auto all request', async () => {
+    const allEnabled = Object.fromEntries(
+      [
+        'applications',
+        'replies',
+        'negotiation',
+        'prescreen',
+        'scheduling',
+        'outreach',
+      ].map((chunk) => [chunk, 2]),
+    );
+    const fetchMock = mockFetchRouter({
+      'GET /v1/me': [jsonOk(buildMeResponse())],
+      'GET /v1/policy': [jsonOk(buildPolicyResponse())],
+      'PUT /v1/automation': [
+        jsonOk({ mode: 'auto_now', version: 4, automation: allEnabled }),
+      ],
     });
 
-    expect(screen.getByText('Always asks you')).toBeInTheDocument();
-    expect(
-      screen.queryByRole('switch', { name: 'Scheduling' }),
-    ).not.toBeInTheDocument();
+    renderPage();
+
+    const autoAll = await screen.findByRole('switch', { name: 'Auto all' });
+    expect(autoAll).not.toBeChecked();
+    fireEvent.click(autoAll);
+
+    await waitFor(() => expect(autoAll).toBeChecked());
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${ANANSI_API_URL}/v1/automation`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ mode: 'auto_now', expected_version: 3 }),
+      }),
+    );
+    for (const chunk of [
+      'Applications',
+      'Replies',
+      'Negotiation',
+      'Prescreen / RTR',
+      'Scheduling',
+      'Outreach',
+    ]) {
+      expect(screen.getByRole('switch', { name: chunk })).toBeChecked();
+    }
   });
 
   it('flipping a toggle POSTs the chunk+level and reverts on a 500', async () => {
@@ -220,9 +318,7 @@ describe('AnansiProfilePage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('switch', { name: 'Replies' }),
-      ).not.toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Replies' })).not.toBeChecked();
     });
 
     // Not wrapped in an async act() here on purpose: fireEvent already
@@ -245,9 +341,7 @@ describe('AnansiProfilePage', () => {
     );
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('switch', { name: 'Replies' }),
-      ).not.toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Replies' })).not.toBeChecked();
     });
     expect(
       screen.getByText("Couldn't save. Please try again."),
@@ -264,9 +358,7 @@ describe('AnansiProfilePage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Timezone')).toHaveValue(
-        'America/New_York',
-      );
+      expect(screen.getByLabelText('Timezone')).toHaveValue('America/New_York');
     });
 
     await act(async () => {
@@ -316,9 +408,7 @@ describe('AnansiProfilePage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('switch', { name: 'Replies' }),
-      ).not.toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Replies' })).not.toBeChecked();
     });
 
     // Turn Replies ON and let the POST resolve (replies -> level 2).
@@ -338,9 +428,7 @@ describe('AnansiProfilePage', () => {
       ([, init]) => (init as RequestInit | undefined)?.method === 'PUT',
     );
     expect(putCall).toBeDefined();
-    const putBody = JSON.parse(
-      (putCall?.[1] as RequestInit).body as string,
-    );
+    const putBody = JSON.parse((putCall?.[1] as RequestInit).body as string);
     // The toggle must survive the whole-document replace:
     expect(putBody.policy.automation.replies).toBe(2);
     expect(putBody.policy.remote_only).toBe(false);
@@ -433,9 +521,7 @@ describe('AnansiProfilePage', () => {
       'GET /v1/me': [jsonOk(buildMeResponse()), jsonOk(buildMeResponse())],
       'GET /v1/policy': [jsonOk(buildPolicyResponse())],
       'PATCH /v1/me': [
-        jsonOk(
-          buildMeResponse({ tour_seen_at: null, tour_state_revision: 1 }),
-        ),
+        jsonOk(buildMeResponse({ tour_seen_at: null, tour_state_revision: 1 })),
       ],
     });
 

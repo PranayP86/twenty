@@ -1290,6 +1290,7 @@ export type CreatePageLayoutTabInput = {
 export type CreatePageLayoutWidgetInput = {
   configuration: Scalars['JSON']['input'];
   gridPosition: GridPositionInput;
+  id?: InputMaybe<Scalars['UUID']['input']>;
   objectMetadataId?: InputMaybe<Scalars['UUID']['input']>;
   pageLayoutTabId: Scalars['UUID']['input'];
   position?: InputMaybe<Scalars['JSON']['input']>;
@@ -3324,6 +3325,7 @@ export type MutationDestroyPageLayoutTabArgs = {
 
 
 export type MutationDestroyPageLayoutWidgetArgs = {
+  expectedStateFingerprint?: InputMaybe<Scalars['String']['input']>;
   id: Scalars['String']['input'];
 };
 
@@ -4367,6 +4369,7 @@ export type PageLayoutWidget = {
   objectMetadataId?: Maybe<Scalars['UUID']['output']>;
   pageLayoutTabId: Scalars['UUID']['output'];
   position?: Maybe<PageLayoutWidgetPosition>;
+  stateFingerprint?: Maybe<Scalars['String']['output']>;
   title: Scalars['String']['output'];
   type: WidgetType;
   universalIdentifier: Scalars['UUID']['output'];
@@ -5442,6 +5445,7 @@ export type SignUp = {
 };
 
 export type SignUpInNewWorkspaceInput = {
+  anansiWorkspaceCreationIdentity?: InputMaybe<Scalars['UUID']['input']>;
   displayName?: InputMaybe<Scalars['String']['input']>;
   subdomain?: InputMaybe<Scalars['String']['input']>;
 };

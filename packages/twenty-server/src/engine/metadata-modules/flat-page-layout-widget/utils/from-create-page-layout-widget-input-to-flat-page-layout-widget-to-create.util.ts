@@ -35,10 +35,10 @@ export const fromCreatePageLayoutWidgetInputToFlatPageLayoutWidgetToCreate = ({
   flatViewFieldGroupMaps,
   flatViewMaps,
 }: FromCreatePageLayoutWidgetInputToFlatPageLayoutWidgetToCreateArgs): FlatPageLayoutWidget => {
-  const { pageLayoutTabId, ...createPageLayoutWidgetInput } =
+  const { id, pageLayoutTabId, ...createPageLayoutWidgetInput } =
     trimAndRemoveDuplicatedWhitespacesFromObjectStringProperties(
       rawCreatePageLayoutWidgetInput,
-      ['pageLayoutTabId'],
+      ['id', 'pageLayoutTabId'],
     );
 
   validateWidgetConfigurationInput({
@@ -46,7 +46,7 @@ export const fromCreatePageLayoutWidgetInputToFlatPageLayoutWidgetToCreate = ({
   });
 
   const createdAt = new Date().toISOString();
-  const pageLayoutWidgetId = v4();
+  const pageLayoutWidgetId = id ?? v4();
 
   const commonProperties = buildFlatPageLayoutWidgetCommonProperties({
     widgetInput: {

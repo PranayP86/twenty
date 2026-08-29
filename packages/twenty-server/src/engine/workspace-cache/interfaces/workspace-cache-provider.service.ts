@@ -14,6 +14,13 @@ export abstract class WorkspaceCacheProvider<
 > {
   abstract computeForCache(workspaceId: string): Promise<T>;
 
+  withCachePublicationFence<TResult>(
+    _workspaceId: string,
+    operation: () => Promise<TResult>,
+  ): Promise<TResult> {
+    return operation();
+  }
+
   compactForStorage(data: T): T | TCompact {
     return data;
   }

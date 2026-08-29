@@ -962,6 +962,7 @@ type PageLayoutWidget {
   conditionalAvailabilityExpression: String
   createdAt: DateTime!
   updatedAt: DateTime!
+  stateFingerprint: String
   isActive: Boolean!
   deletedAt: DateTime
   isOverridden: Boolean @deprecated(reason: "isOverridden is deprecated")
@@ -3561,7 +3562,7 @@ type Mutation {
   resetPageLayoutTabToDefault(id: String!): PageLayoutTab!
   createPageLayoutWidget(input: CreatePageLayoutWidgetInput!): PageLayoutWidget!
   updatePageLayoutWidget(id: String!, input: UpdatePageLayoutWidgetInput!): PageLayoutWidget!
-  destroyPageLayoutWidget(id: String!): Boolean!
+  destroyPageLayoutWidget(id: String!, expectedStateFingerprint: String): Boolean!
   createOneAgent(input: CreateAgentInput!): Agent!
   updateOneAgent(input: UpdateAgentInput!): Agent!
   deleteOneAgent(input: AgentIdInput!): Agent!
@@ -4199,6 +4200,7 @@ input GridPositionInput {
 }
 
 input CreatePageLayoutWidgetInput {
+  id: UUID
   pageLayoutTabId: UUID!
   title: String!
   type: WidgetType!
@@ -4865,6 +4867,7 @@ input GetAuthorizationUrlForSSOInput {
 }
 
 input SignUpInNewWorkspaceInput {
+  anansiWorkspaceCreationIdentity: UUID
   displayName: String
   subdomain: String
 }

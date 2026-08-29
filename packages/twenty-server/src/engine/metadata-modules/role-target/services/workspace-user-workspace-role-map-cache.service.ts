@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
 
+import { InjectDataSource } from '@nestjs/typeorm';
+
 import { isDefined } from 'twenty-shared/utils';
-import { IsNull, Not } from 'typeorm';
+import { type DataSource, IsNull, Not } from 'typeorm';
 
 import { WorkspaceCacheProvider } from 'src/engine/workspace-cache/interfaces/workspace-cache-provider.service';
 
 import { RoleTargetEntity } from 'src/engine/metadata-modules/role-target/role-target.entity';
 import { UserWorkspaceRoleMap } from 'src/engine/metadata-modules/role-target/types/user-workspace-role-map';
+import { withAnansiRoleCacheReadFence } from 'src/engine/metadata-modules/role/services/anansi-role-cache-fence';
 import { InjectWorkspaceScopedRepository } from 'src/engine/twenty-orm/workspace-scoped-repository/inject-workspace-scoped-repository.decorator';
 import { WorkspaceScopedRepository } from 'src/engine/twenty-orm/workspace-scoped-repository/workspace-scoped-repository';
 import { WorkspaceCache } from 'src/engine/workspace-cache/decorators/workspace-cache.decorator';
@@ -17,6 +20,8 @@ export class WorkspaceUserWorkspaceRoleMapCacheService extends WorkspaceCachePro
   constructor(
     @InjectWorkspaceScopedRepository(RoleTargetEntity)
     private readonly roleTargetRepository: WorkspaceScopedRepository<RoleTargetEntity>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {
     super();
   }
@@ -35,5 +40,16 @@ export class WorkspaceUserWorkspaceRoleMapCacheService extends WorkspaceCachePro
 
       return acc;
     }, {} as UserWorkspaceRoleMap);
+  }
+
+  withCachePublicationFence<TResult>(
+    workspaceId: string,
+    operation: () => Promise<TResult>,
+  ): Promise<TResult> {
+    return withAnansiRoleCacheReadFence(
+      this.dataSource,
+      workspaceId,
+      operation,
+    );
   }
 }

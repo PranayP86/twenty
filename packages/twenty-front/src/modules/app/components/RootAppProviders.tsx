@@ -2,7 +2,9 @@ import { StrictMode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 
 import { TrackPageViewEffect } from '@/analytics/components/TrackPageViewEffect';
+import { AnansiAgentDock } from '@/anansi-agent/components/AnansiAgentDock';
 import { SharedAppProviders } from '@/app/components/SharedAppProviders';
+import { CaptureAnansiGmailOAuthFragmentEffect } from '@/app/effect-components/CaptureAnansiGmailOAuthFragmentEffect';
 import { InitializeQueryParamStateEffect } from '@/app/effect-components/InitializeQueryParamStateEffect';
 import { AuthProvider } from '@/auth/components/AuthProvider';
 import { SignOutOnOtherTabSignOutEffect } from '@/auth/effect-components/SignOutOnOtherTabSignOutEffect';
@@ -39,7 +41,9 @@ export const RootAppProviders = () => {
                   <PromiseRejectionEffect />
                   <PageTitle title={pageTitle} />
                   <PageFavicon />
+                  <CaptureAnansiGmailOAuthFragmentEffect />
                   <Outlet />
+                  <AnansiAgentDock />
                   <InitializeQueryParamStateEffect />
                   <TrackPageViewEffect />
                   <RequestFreshCaptchaTokenEffect />

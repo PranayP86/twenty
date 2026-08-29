@@ -1,9 +1,8 @@
 import { AnansiAllowlistService } from 'src/engine/core-modules/auth/services/anansi-allowlist.service';
 
-// ANANSI PATCH: unit coverage for the Anansi Core allowlist HTTP check —
-// every failure mode (env unset, network error/timeout, non-200, malformed
-// JSON) must fail closed (deny). This is the compile+test gate for
-// .github/workflows/anansi-server-tests.yml.
+// Explicit boolean decisions are returned; every unavailable or malformed
+// response must fail closed by throwing rather than masquerading as denial.
+// This is part of .github/workflows/anansi-server-tests.yml.
 describe('AnansiAllowlistService', () => {
   const ORIGINAL_ENV = process.env;
 
@@ -62,7 +61,7 @@ describe('AnansiAllowlistService', () => {
     await expect(service.isApproved('a@b.com')).resolves.toBe(false);
   });
 
-  it('returns false when Core responds 200 for an unknown email (status null-ish shape)', async () => {
+  it('returns false when Core explicitly denies an unknown email', async () => {
     mockFetchResolvedWith({
       body: { email: 'a@b.com', status: null, approved: false },
     });
@@ -72,15 +71,15 @@ describe('AnansiAllowlistService', () => {
     await expect(service.isApproved('a@b.com')).resolves.toBe(false);
   });
 
-  it('returns false on a non-200 response (fail closed)', async () => {
-    mockFetchResolvedWith({ ok: false, status: 403 });
+  it('throws when Core returns a non-200 response (fail closed without explicit denial)', async () => {
+    mockFetchResolvedWith({ ok: false, status: 503 });
 
     const service = new AnansiAllowlistService();
 
-    await expect(service.isApproved('a@b.com')).resolves.toBe(false);
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
   });
 
-  it('returns false when the request times out (fail closed)', async () => {
+  it('throws when the request times out (fail closed without explicit denial)', async () => {
     // Mirrors what AbortSignal.timeout() produces on the real fetch: the
     // promise rejects. The service does not special-case the rejection
     // reason, so any rejection (including a real timeout) is exercised
@@ -88,23 +87,26 @@ describe('AnansiAllowlistService', () => {
     jest
       .spyOn(global, 'fetch')
       .mockRejectedValue(
-        new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+        new DOMException(
+          'The operation was aborted due to timeout',
+          'TimeoutError',
+        ),
       );
 
     const service = new AnansiAllowlistService();
 
-    await expect(service.isApproved('a@b.com')).resolves.toBe(false);
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
   });
 
-  it('returns false on a network error (fail closed)', async () => {
+  it('throws on a network error (fail closed without explicit denial)', async () => {
     jest.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
 
     const service = new AnansiAllowlistService();
 
-    await expect(service.isApproved('a@b.com')).resolves.toBe(false);
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
   });
 
-  it('returns false on a malformed JSON body (fail closed)', async () => {
+  it('throws on malformed JSON (fail closed without explicit denial)', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       status: 200,
@@ -113,26 +115,34 @@ describe('AnansiAllowlistService', () => {
 
     const service = new AnansiAllowlistService();
 
-    await expect(service.isApproved('a@b.com')).resolves.toBe(false);
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
   });
 
-  it('returns false and never calls fetch when ANANSI_CORE_URL is unset (fail closed)', async () => {
+  it('throws when a 200 response omits an explicit boolean decision', async () => {
+    mockFetchResolvedWith({ body: { email: 'a@b.com', status: 'approved' } });
+
+    const service = new AnansiAllowlistService();
+
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
+  });
+
+  it('throws and never calls fetch when ANANSI_CORE_URL is unset', async () => {
     delete process.env.ANANSI_CORE_URL;
 
     const fetchSpy = jest.spyOn(global, 'fetch');
     const service = new AnansiAllowlistService();
 
-    await expect(service.isApproved('a@b.com')).resolves.toBe(false);
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('returns false and never calls fetch when ANANSI_INTERNAL_TOKEN is unset (fail closed)', async () => {
+  it('throws and never calls fetch when ANANSI_INTERNAL_TOKEN is unset', async () => {
     delete process.env.ANANSI_INTERNAL_TOKEN;
 
     const fetchSpy = jest.spyOn(global, 'fetch');
     const service = new AnansiAllowlistService();
 
-    await expect(service.isApproved('a@b.com')).resolves.toBe(false);
+    await expect(service.isApproved('a@b.com')).rejects.toThrow();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

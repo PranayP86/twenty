@@ -16,16 +16,45 @@ import {
   currentUserState,
 } from '@/auth/states/currentUserState';
 import {
+  SignInUpStep,
+  signInUpStepState,
+} from '@/auth/states/signInUpStepState';
+import {
   type CurrentWorkspace,
   currentWorkspaceState,
 } from '@/auth/states/currentWorkspaceState';
 import { returnToPathState } from '@/auth/states/returnToPathState';
+import { isMultiWorkspaceEnabledState } from '@/client-config/states/isMultiWorkspaceEnabledState';
 import { SnackBarComponentInstanceContext } from '@/ui/feedback/snack-bar-manager/contexts/SnackBarComponentInstanceContext';
 import { renderHook } from '@testing-library/react';
 import { getDefaultStore } from 'jotai';
+import { AppPath } from 'twenty-shared/types';
 import { WorkspaceActivationStatus } from 'twenty-shared/workspace';
+import {
+  type AvailableWorkspaces,
+  GetWorkspaceCreationDefaultsDocument,
+} from '~/generated-metadata/graphql';
 
 const redirectSpy = jest.fn();
+const redirectToWorkspaceDomainSpy = jest.fn();
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_USER_ID = '22222222-2222-4222-8222-222222222222';
+const getPendingProvisioningMarkerKey = (userId: string) =>
+  `anansiPendingProvisioningWorkspaceState:${userId}`;
+const PENDING_PROVISIONING_MARKER_KEY =
+  getPendingProvisioningMarkerKey(USER_ID);
+const WORKSPACE_URL = 'https://friend.twenty.com';
+const AVAILABLE_WORKSPACES: AvailableWorkspaces = {
+  availableWorkspacesForSignIn: [
+    {
+      id: 'workspace-id',
+      loginToken: 'workspace-login-token',
+      workspaceUrls: { subdomainUrl: WORKSPACE_URL, customUrl: null },
+      sso: [],
+    },
+  ],
+  availableWorkspacesForSignUp: [],
+};
 
 jest.mock('@/domain-manager/hooks/useRedirect', () => ({
   useRedirect: jest.fn().mockImplementation(() => ({
@@ -53,7 +82,7 @@ jest.mock('@/auth/sign-in-up/hooks/useSignUpInNewWorkspace', () => ({
 
 jest.mock('@/domain-manager/hooks/useRedirectToWorkspaceDomain', () => ({
   useRedirectToWorkspaceDomain: jest.fn().mockImplementation(() => ({
-    redirectToWorkspaceDomain: jest.fn(),
+    redirectToWorkspaceDomain: redirectToWorkspaceDomainSpy,
   })),
 }));
 
@@ -69,8 +98,23 @@ jest.mock('@/domain-manager/hooks/useLastAuthenticatedWorkspaceDomain', () => ({
   })),
 }));
 
+const workspaceCreationDefaultsMock = {
+  request: { query: GetWorkspaceCreationDefaultsDocument },
+  result: {
+    data: {
+      getWorkspaceCreationDefaults: {
+        __typename: 'WorkspaceCreationDefaultsDTO',
+        displayName: 'Friend',
+        subdomain: 'friend',
+      },
+    },
+  },
+};
+
 const Wrapper = ({ children }: { children: ReactNode }) => (
-  <MockedProvider mocks={Object.values(mocks)}>
+  <MockedProvider
+    mocks={[...Object.values(mocks), workspaceCreationDefaultsMock]}
+  >
     <MemoryRouter>
       <SnackBarComponentInstanceContext.Provider
         value={{ instanceId: 'test-instance-id' }}
@@ -96,7 +140,171 @@ const renderHooks = () => {
 describe('useAuth', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    localStorage.removeItem(PENDING_PROVISIONING_MARKER_KEY);
+    localStorage.removeItem(getPendingProvisioningMarkerKey(OTHER_USER_ID));
+    getDefaultStore().set(isMultiWorkspaceEnabledState.atom, true);
     getDefaultStore().set(returnToPathState.atom, '');
+    getDefaultStore().set(signInUpStepState.atom, SignInUpStep.Init);
+  });
+
+  it('resumes provisioning by server-issued identity despite an unrelated new membership', async () => {
+    localStorage.setItem(
+      PENDING_PROVISIONING_MARKER_KEY,
+      JSON.stringify({
+        anansiWorkspaceCreationIdentity: USER_ID,
+        email,
+      }),
+    );
+    const { result } = renderHooks();
+
+    await act(async () => {
+      await result.current.navigateAfterMultiWorkspaceSignInUp(
+        AVAILABLE_WORKSPACES,
+        email,
+        USER_ID,
+      );
+    });
+
+    expect(getDefaultStore().get(signInUpStepState.atom)).toBe(
+      SignInUpStep.WorkspaceCreation,
+    );
+    expect(redirectToWorkspaceDomainSpy).not.toHaveBeenCalled();
+  });
+
+  it('stores the server-issued identity before entering workspace creation', async () => {
+    const { result } = renderHooks();
+    const noAvailableWorkspaces: AvailableWorkspaces = {
+      availableWorkspacesForSignIn: [],
+      availableWorkspacesForSignUp: [],
+    };
+
+    await act(async () => {
+      await result.current.navigateAfterMultiWorkspaceSignInUp(
+        noAvailableWorkspaces,
+        email,
+        USER_ID,
+      );
+    });
+
+    expect(
+      JSON.parse(localStorage.getItem(PENDING_PROVISIONING_MARKER_KEY)!),
+    ).toEqual({
+      anansiWorkspaceCreationIdentity: USER_ID,
+      email,
+    });
+    expect(getDefaultStore().get(signInUpStepState.atom)).toBe(
+      SignInUpStep.WorkspaceCreation,
+    );
+  });
+
+  it('does not store an Anansi intent for the existing-user workspace form', async () => {
+    window.history.pushState({}, '', '/?action=create-new-workspace');
+    const { result } = renderHooks();
+
+    try {
+      await act(async () => {
+        await result.current.navigateAfterMultiWorkspaceSignInUp(
+          AVAILABLE_WORKSPACES,
+          email,
+          USER_ID,
+        );
+      });
+
+      expect(localStorage.getItem(PENDING_PROVISIONING_MARKER_KEY)).toBeNull();
+      expect(getDefaultStore().get(signInUpStepState.atom)).toBe(
+        SignInUpStep.WorkspaceCreation,
+      );
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
+  it('fails closed when creation intent cannot be stored', async () => {
+    const setItemSpy = jest
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('storage unavailable', 'QuotaExceededError');
+      });
+    const { result } = renderHooks();
+    const noAvailableWorkspaces: AvailableWorkspaces = {
+      availableWorkspacesForSignIn: [],
+      availableWorkspacesForSignUp: [],
+    };
+
+    try {
+      await expect(
+        result.current.navigateAfterMultiWorkspaceSignInUp(
+          noAvailableWorkspaces,
+          email,
+          USER_ID,
+        ),
+      ).rejects.toThrow('Could not save workspace setup state');
+      expect(getDefaultStore().get(signInUpStepState.atom)).not.toBe(
+        SignInUpStep.WorkspaceCreation,
+      );
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  it('does not resume provisioning for another server-issued identity', async () => {
+    localStorage.setItem(
+      getPendingProvisioningMarkerKey(OTHER_USER_ID),
+      JSON.stringify({
+        anansiWorkspaceCreationIdentity: OTHER_USER_ID,
+        email,
+      }),
+    );
+    const { result } = renderHooks();
+
+    await act(async () => {
+      await result.current.navigateAfterMultiWorkspaceSignInUp(
+        AVAILABLE_WORKSPACES,
+        email,
+        USER_ID,
+      );
+    });
+
+    expect(redirectToWorkspaceDomainSpy).toHaveBeenCalledWith(
+      WORKSPACE_URL,
+      AppPath.Verify,
+      { loginToken: 'workspace-login-token', email },
+    );
+    expect(
+      localStorage.getItem(getPendingProvisioningMarkerKey(OTHER_USER_ID)),
+    ).not.toBeNull();
+    expect(getDefaultStore().get(signInUpStepState.atom)).not.toBe(
+      SignInUpStep.WorkspaceCreation,
+    );
+  });
+
+  it('ignores Anansi recovery markers when multi-workspace mode is disabled', async () => {
+    localStorage.setItem(
+      PENDING_PROVISIONING_MARKER_KEY,
+      JSON.stringify({
+        anansiWorkspaceCreationIdentity: USER_ID,
+        email,
+      }),
+    );
+    getDefaultStore().set(isMultiWorkspaceEnabledState.atom, false);
+    const { result } = renderHooks();
+
+    await act(async () => {
+      await result.current.navigateAfterMultiWorkspaceSignInUp(
+        AVAILABLE_WORKSPACES,
+        email,
+        USER_ID,
+      );
+    });
+
+    expect(redirectToWorkspaceDomainSpy).toHaveBeenCalledWith(
+      WORKSPACE_URL,
+      AppPath.Verify,
+      { loginToken: 'workspace-login-token', email },
+    );
+    expect(getDefaultStore().get(signInUpStepState.atom)).not.toBe(
+      SignInUpStep.WorkspaceCreation,
+    );
   });
 
   it('should return login token object', async () => {

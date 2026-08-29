@@ -60,6 +60,12 @@ const LOCAL_CACHE_SWEEP_INTERVAL_MS = 60 * 1000;
 const PACKING_INTERVAL_MS = 500;
 const PACKING_PONDERATION_BUDGET = 64;
 const MIN_IDLE_BEFORE_PACKING_MS = 60 * 1000;
+// Authorization cache reads validate the distributed hash on every request.
+// A local-TTL or memoized role map must never outlive a remote role demotion.
+const SECURITY_SENSITIVE_ROLE_CACHE_KEYS = new Set<WorkspaceCacheKeyName>([
+  'flatRoleTargetMaps',
+  'userWorkspaceRoleMap',
+]);
 // Per-provider entry caps, keyed by local cache key prefix (ORM graphs are ~5 MB each).
 const MAX_LOCAL_ENTRIES_BY_KEY_NAME = new Map<string, number>([
   ['ORMEntityMetadatas', 128],
@@ -200,61 +206,89 @@ export class WorkspaceCacheService implements OnModuleInit, OnModuleDestroy {
   ): Promise<WorkspaceCacheResultWithHashes<K>> {
     this.assertValidCacheParameters(workspaceId, cacheKeyNames);
 
-    const memoKey =
-      `${workspaceId}-${[...cacheKeyNames].sort().join(',')}` as const;
-
-    const result = await this.memoizer.memoizePromiseAndExecute(
-      memoKey,
-      async () => {
-        const { freshKeys, staleKeys } = this.checkLocalTTL(
-          workspaceId,
-          cacheKeyNames,
-        );
-        const freshEntries = this.getFromLocalCache(workspaceId, freshKeys);
-
-        if (staleKeys.length === 0) {
-          return freshEntries;
-        }
-
-        const {
-          validKeys,
-          keysNeedingDataFromRedis,
-          keysNeedingRecompute,
-          adoptableHashes,
-        } = await this.validateLocalHashAgainstRedisHash(
-          workspaceId,
-          staleKeys,
-        );
-        const validatedEntries = this.getFromLocalCache(workspaceId, validKeys);
-
-        const { redisEntries, missingInRedis } = await this.fetchDataFromRedis(
-          workspaceId,
-          keysNeedingDataFromRedis,
-        );
-
-        const keysToRecompute = [...keysNeedingRecompute, ...missingInRedis];
-        const recomputedEntries = await this.recomputeDataFromProvider(
-          workspaceId,
-          keysToRecompute,
-          { strategy: 'recover', adoptableHashes },
-        );
-
-        return {
-          data: {
-            ...freshEntries.data,
-            ...validatedEntries.data,
-            ...redisEntries.data,
-            ...recomputedEntries.data,
-          },
-          hashes: {
-            ...freshEntries.hashes,
-            ...validatedEntries.hashes,
-            ...redisEntries.hashes,
-            ...recomputedEntries.hashes,
-          },
-        };
-      },
+    return this.withCachePublicationFences(workspaceId, cacheKeyNames, () =>
+      this.getOrRecomputeWithHashesUnderFence(workspaceId, cacheKeyNames),
     );
+  }
+
+  private async getOrRecomputeWithHashesUnderFence<
+    const K extends WorkspaceCacheKeyName[],
+  >(
+    workspaceId: string,
+    cacheKeyNames: K,
+  ): Promise<WorkspaceCacheResultWithHashes<K>> {
+    const securitySensitiveKeyNames = cacheKeyNames.filter((keyName) =>
+      SECURITY_SENSITIVE_ROLE_CACHE_KEYS.has(keyName),
+    );
+    const securitySensitiveHashes = await this.getCacheHashes(
+      workspaceId,
+      securitySensitiveKeyNames,
+    );
+    const securitySensitiveVersion = [...securitySensitiveKeyNames]
+      .sort()
+      .map(
+        (keyName) =>
+          `${keyName}:${securitySensitiveHashes[keyName] ?? 'missing'}`,
+      )
+      .join(',');
+    const memoKey =
+      `${workspaceId}-${[...cacheKeyNames].sort().join(',')}-${securitySensitiveVersion}` as const;
+
+    const getCacheEntries = async (): Promise<CacheEntriesResult> => {
+      const { freshKeys, staleKeys } = this.checkLocalTTL(
+        workspaceId,
+        cacheKeyNames,
+      );
+      const freshEntries = this.getFromLocalCache(workspaceId, freshKeys);
+
+      if (staleKeys.length === 0) {
+        return freshEntries;
+      }
+
+      const {
+        validKeys,
+        keysNeedingDataFromRedis,
+        keysNeedingRecompute,
+        adoptableHashes,
+      } = await this.validateLocalHashAgainstRedisHash(workspaceId, staleKeys);
+      const validatedEntries = this.getFromLocalCache(workspaceId, validKeys);
+
+      const { redisEntries, missingInRedis } = await this.fetchDataFromRedis(
+        workspaceId,
+        keysNeedingDataFromRedis,
+      );
+
+      const keysToRecompute = [...keysNeedingRecompute, ...missingInRedis];
+      const recomputedEntries = await this.recomputeAndPublishDataFromProvider(
+        workspaceId,
+        keysToRecompute,
+        { strategy: 'recover', adoptableHashes },
+      );
+
+      return {
+        data: {
+          ...freshEntries.data,
+          ...validatedEntries.data,
+          ...redisEntries.data,
+          ...recomputedEntries.data,
+        },
+        hashes: {
+          ...freshEntries.hashes,
+          ...validatedEntries.hashes,
+          ...redisEntries.hashes,
+          ...recomputedEntries.hashes,
+        },
+      };
+    };
+
+    // A missing hash is the distributed flush window, not a reusable version.
+    // An earlier cache bootstrap may still have a memoized "missing" result.
+    const canMemoize = securitySensitiveKeyNames.every((keyName) =>
+      isDefined(securitySensitiveHashes[keyName]),
+    );
+    const result = canMemoize
+      ? await this.memoizer.memoizePromiseAndExecute(memoKey, getCacheEntries)
+      : await getCacheEntries();
 
     return result as WorkspaceCacheResultWithHashes<K>;
   }
@@ -373,7 +407,12 @@ export class WorkspaceCacheService implements OnModuleInit, OnModuleDestroy {
       const localKey = this.buildCacheKey(workspaceId, keyName);
       const cached = this.localCache.get(localKey);
 
-      if (isDefined(cached) && now - cached.lastHashCheckedAt < LOCAL_TTL_MS) {
+      if (SECURITY_SENSITIVE_ROLE_CACHE_KEYS.has(keyName)) {
+        staleKeys.push(keyName);
+      } else if (
+        isDefined(cached) &&
+        now - cached.lastHashCheckedAt < LOCAL_TTL_MS
+      ) {
         freshKeys.push(keyName);
       } else {
         staleKeys.push(keyName);
@@ -498,6 +537,42 @@ export class WorkspaceCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async recomputeDataFromProvider(
+    workspaceId: string,
+    cacheKeyNames: WorkspaceCacheKeyName[],
+    hashResolution: RecomputeHashResolution,
+  ): Promise<CacheEntriesResult> {
+    return this.withCachePublicationFences(workspaceId, cacheKeyNames, () =>
+      this.recomputeAndPublishDataFromProvider(
+        workspaceId,
+        cacheKeyNames,
+        hashResolution,
+      ),
+    );
+  }
+
+  private async withCachePublicationFences<TResult>(
+    workspaceId: string,
+    cacheKeyNames: readonly WorkspaceCacheKeyName[],
+    operation: () => Promise<TResult>,
+  ): Promise<TResult> {
+    const providers = [
+      ...new Set(
+        cacheKeyNames.map((keyName) => this.getProviderOrThrow(keyName)),
+      ),
+    ];
+    let fencedOperation = operation;
+
+    for (const provider of providers.reverse()) {
+      const nextOperation = fencedOperation;
+
+      fencedOperation = () =>
+        provider.withCachePublicationFence(workspaceId, nextOperation);
+    }
+
+    return fencedOperation();
+  }
+
+  private async recomputeAndPublishDataFromProvider(
     workspaceId: string,
     cacheKeyNames: WorkspaceCacheKeyName[],
     hashResolution: RecomputeHashResolution,

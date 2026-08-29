@@ -1,7 +1,5 @@
 // ANANSI PATCH (WS-B): Autonomy section -- one toggle row per automation
-// chunk (level >= 2 == on), except Scheduling which always renders as a
-// disabled "Always asks you" row with no control (design ruling: scheduling
-// never auto-approves from this page).
+// chunk plus one versioned all-chunks control.
 import { useLingui } from '@lingui/react/macro';
 import { styled } from '@linaria/react';
 import { Card, CardContent } from 'twenty-ui/surfaces';
@@ -26,12 +24,18 @@ const StyledFootnote = styled.p`
 type AnansiAutonomySectionProps = {
   automation: AnansiAutomationMap;
   errors: Partial<Record<AnansiAutomationChunk, string>>;
+  autoAllError?: string;
+  isSavingAutoAll: boolean;
+  onSetAll: (nextOn: boolean) => void;
   onToggleChunk: (chunk: AnansiAutomationChunk, nextOn: boolean) => void;
 };
 
 export const AnansiAutonomySection = ({
   automation,
   errors,
+  autoAllError,
+  isSavingAutoAll,
+  onSetAll,
   onToggleChunk,
 }: AnansiAutonomySectionProps) => {
   const { t } = useLingui();
@@ -45,6 +49,10 @@ export const AnansiAutonomySection = ({
     outreach: t`Outreach`,
   };
 
+  const allEnabled = ANANSI_AUTOMATION_CHUNKS.every(
+    (chunk) => getAnansiAutomationLevel(automation, chunk) >= 2,
+  );
+
   return (
     <Section>
       <H2Title
@@ -52,29 +60,32 @@ export const AnansiAutonomySection = ({
         description={t`Choose what Anansi can do without asking you first`}
       />
       <Card rounded>
+        <CardContent divider>
+          <AnansiToggleRow
+            title={t`Auto all`}
+            value={allEnabled}
+            onChange={onSetAll}
+            error={autoAllError}
+            disabled={isSavingAutoAll}
+          />
+        </CardContent>
         {ANANSI_AUTOMATION_CHUNKS.map((chunk, index) => (
           <CardContent
             key={chunk}
             divider={index < ANANSI_AUTOMATION_CHUNKS.length - 1}
           >
-            {chunk === 'scheduling' ? (
-              <AnansiToggleRow
-                title={chunkLabels[chunk]}
-                disabledLabel={t`Always asks you`}
-              />
-            ) : (
-              <AnansiToggleRow
-                title={chunkLabels[chunk]}
-                value={getAnansiAutomationLevel(automation, chunk) >= 2}
-                onChange={(nextOn) => onToggleChunk(chunk, nextOn)}
-                error={errors[chunk]}
-              />
-            )}
+            <AnansiToggleRow
+              title={chunkLabels[chunk]}
+              value={getAnansiAutomationLevel(automation, chunk) >= 2}
+              onChange={(nextOn) => onToggleChunk(chunk, nextOn)}
+              error={errors[chunk]}
+              disabled={isSavingAutoAll}
+            />
           </CardContent>
         ))}
       </Card>
       <StyledFootnote>
-        {t`Documents and commitments always ask you first.`}
+        {t`Missing facts, sensitive documents, commitments, challenges, and risky sites always stop for you.`}
       </StyledFootnote>
     </Section>
   );

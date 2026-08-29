@@ -700,6 +700,7 @@ export interface PageLayoutWidget {
     conditionalAvailabilityExpression?: Scalars['String']
     createdAt: Scalars['DateTime']
     updatedAt: Scalars['DateTime']
+    stateFingerprint?: Scalars['String']
     isActive: Scalars['Boolean']
     deletedAt?: Scalars['DateTime']
     /** @deprecated isOverridden is deprecated */
@@ -6801,7 +6802,7 @@ export interface UpdatePageLayoutWidgetWithIdInput {id: Scalars['UUID'],pageLayo
 
 export interface GridPositionInput {row: Scalars['Float'],column: Scalars['Float'],rowSpan: Scalars['Float'],columnSpan: Scalars['Float']}
 
-export interface CreatePageLayoutWidgetInput {pageLayoutTabId: Scalars['UUID'],title: Scalars['String'],type: WidgetType,objectMetadataId?: (Scalars['UUID'] | null),gridPosition: GridPositionInput,position?: (Scalars['JSON'] | null),configuration: Scalars['JSON']}
+export interface CreatePageLayoutWidgetInput {id?: (Scalars['UUID'] | null),pageLayoutTabId: Scalars['UUID'],title: Scalars['String'],type: WidgetType,objectMetadataId?: (Scalars['UUID'] | null),gridPosition: GridPositionInput,position?: (Scalars['JSON'] | null),configuration: Scalars['JSON']}
 
 export interface UpdatePageLayoutWidgetInput {pageLayoutTabId?: (Scalars['UUID'] | null),title?: (Scalars['String'] | null),type?: (WidgetType | null),objectMetadataId?: (Scalars['UUID'] | null),gridPosition?: (GridPositionInput | null),position?: (Scalars['JSON'] | null),configuration?: (Scalars['JSON'] | null),conditionalDisplay?: (Scalars['JSON'] | null),conditionalAvailabilityExpression?: (Scalars['String'] | null)}
 

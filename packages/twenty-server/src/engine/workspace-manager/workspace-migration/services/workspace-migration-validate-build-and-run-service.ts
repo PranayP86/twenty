@@ -33,6 +33,14 @@ import {
   WorkspaceMigrationOrchestratorSuccessfulResult,
 } from 'src/engine/workspace-manager/workspace-migration/types/workspace-migration-orchestrator.type';
 import { WorkspaceMigrationRunnerService } from 'src/engine/workspace-manager/workspace-migration/workspace-migration-runner/services/workspace-migration-runner.service';
+import { attachPageLayoutWidgetDeleteStateFingerprints } from 'src/engine/workspace-manager/workspace-migration/services/utils/attach-page-layout-widget-delete-state-fingerprints.util';
+
+type PageLayoutWidgetDeleteStateFingerprintArgs = {
+  expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier?: Record<
+    string,
+    string
+  >;
+};
 
 type ValidateBuildAndRunWorkspaceMigrationFromMatriceArgs = {
   workspaceId: string;
@@ -40,7 +48,7 @@ type ValidateBuildAndRunWorkspaceMigrationFromMatriceArgs = {
   isSystemBuild?: boolean;
   applicationUniversalIdentifier: string;
   dryRun?: boolean;
-};
+} & PageLayoutWidgetDeleteStateFingerprintArgs;
 
 type ValidateBuildAndRunWorkspaceMigrationFromRecordArgs = {
   workspaceId: string;
@@ -48,7 +56,7 @@ type ValidateBuildAndRunWorkspaceMigrationFromRecordArgs = {
   isSystemBuild?: boolean;
   applicationUniversalIdentifier: string;
   dryRun?: boolean;
-};
+} & PageLayoutWidgetDeleteStateFingerprintArgs;
 
 type ValidateBuildAndRunWorkspaceMigrationFromRecordInternalArgs =
   ValidateBuildAndRunWorkspaceMigrationFromRecordArgs & {
@@ -63,7 +71,8 @@ type ComputeAndRunWorkspaceMigrationFromResolvedOperationsArgs = {
   isSystemBuild: boolean;
   applicationUniversalIdentifier: string;
   dryRun?: boolean;
-} & FlatEntityMapsBundle;
+} & FlatEntityMapsBundle &
+  PageLayoutWidgetDeleteStateFingerprintArgs;
 
 @Injectable()
 export class WorkspaceMigrationValidateBuildAndRunService {
@@ -85,18 +94,23 @@ export class WorkspaceMigrationValidateBuildAndRunService {
   }
 
   public async validateBuildAndRunWorkspaceMigrationFromTo(
-    args: WorkspaceMigrationOrchestratorBuildArgs & {
-      idByUniversalIdentifierByMetadataName?: IdByUniversalIdentifierByMetadataName;
-      dryRun?: boolean;
-    },
+    args: WorkspaceMigrationOrchestratorBuildArgs &
+      PageLayoutWidgetDeleteStateFingerprintArgs & {
+        idByUniversalIdentifierByMetadataName?: IdByUniversalIdentifierByMetadataName;
+        dryRun?: boolean;
+      },
   ): Promise<
     | WorkspaceMigrationOrchestratorFailedResult
     | (WorkspaceMigrationOrchestratorSuccessfulResult & {
         hasSchemaMetadataChanged: boolean;
       })
   > {
-    const { idByUniversalIdentifierByMetadataName, dryRun, ...buildArgs } =
-      args;
+    const {
+      idByUniversalIdentifierByMetadataName,
+      dryRun,
+      expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
+      ...buildArgs
+    } = args;
 
     const buildStart = performance.now();
     const validateAndBuildResult =
@@ -147,10 +161,14 @@ export class WorkspaceMigrationValidateBuildAndRunService {
       return validateAndBuildResult;
     }
 
-    const workspaceMigration = enrichCreateWorkspaceMigrationActionsWithIds({
-      idByUniversalIdentifierByMetadataName:
-        idByUniversalIdentifierByMetadataName ?? {},
-      workspaceMigration: validateAndBuildResult.workspaceMigration,
+    const workspaceMigration = attachPageLayoutWidgetDeleteStateFingerprints({
+      expectedStateFingerprintByUniversalIdentifier:
+        expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
+      workspaceMigration: enrichCreateWorkspaceMigrationActionsWithIds({
+        idByUniversalIdentifierByMetadataName:
+          idByUniversalIdentifierByMetadataName ?? {},
+        workspaceMigration: validateAndBuildResult.workspaceMigration,
+      }),
     });
 
     if (dryRun === true || workspaceMigration.actions.length === 0) {
@@ -212,6 +230,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
     isSystemBuild = false,
     applicationUniversalIdentifier,
     dryRun,
+    expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
   }: ValidateBuildAndRunWorkspaceMigrationFromMatriceArgs): Promise<
     | WorkspaceMigrationOrchestratorFailedResult
     | (WorkspaceMigrationOrchestratorSuccessfulResult & {
@@ -227,6 +246,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
       isSystemBuild,
       applicationUniversalIdentifier,
       dryRun,
+      expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
     });
   }
 
@@ -257,6 +277,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
     isSystemBuild = false,
     applicationUniversalIdentifier,
     dryRun,
+    expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
   }: ValidateBuildAndRunWorkspaceMigrationFromMatriceArgs): Promise<
     | WorkspaceMigrationOrchestratorFailedResult
     | (WorkspaceMigrationOrchestratorSuccessfulResult & {
@@ -272,6 +293,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
       isSystemBuild,
       applicationUniversalIdentifier,
       dryRun,
+      expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
       skipSideEffectExpandEngine: true,
     });
   }
@@ -282,6 +304,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
     isSystemBuild = false,
     applicationUniversalIdentifier,
     dryRun,
+    expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
     skipSideEffectExpandEngine,
   }: ValidateBuildAndRunWorkspaceMigrationFromRecordInternalArgs): Promise<
     | WorkspaceMigrationOrchestratorFailedResult
@@ -333,6 +356,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
       isSystemBuild,
       applicationUniversalIdentifier,
       dryRun,
+      expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
       flatApplicationMaps,
       allRelatedFlatEntityMaps,
       allMetadataNameCacheToCompute,
@@ -345,6 +369,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
     isSystemBuild,
     applicationUniversalIdentifier,
     dryRun,
+    expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
     flatApplicationMaps,
     allRelatedFlatEntityMaps,
     allMetadataNameCacheToCompute,
@@ -383,6 +408,7 @@ export class WorkspaceMigrationValidateBuildAndRunService {
       additionalCacheDataMaps,
       idByUniversalIdentifierByMetadataName,
       dryRun,
+      expectedPageLayoutWidgetStateFingerprintByUniversalIdentifier,
     });
   }
 }

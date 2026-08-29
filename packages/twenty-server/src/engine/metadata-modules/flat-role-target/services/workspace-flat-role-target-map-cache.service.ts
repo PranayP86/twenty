@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 
-import { Repository } from 'typeorm';
+import { type DataSource, Repository } from 'typeorm';
 
 import { WorkspaceCacheProvider } from 'src/engine/workspace-cache/interfaces/workspace-cache-provider.service';
 
@@ -11,6 +11,7 @@ import { createEmptyFlatEntityMaps } from 'src/engine/metadata-modules/flat-enti
 import { type FlatRoleTargetMaps } from 'src/engine/metadata-modules/flat-role-target/types/flat-role-target-maps.type';
 import { fromRoleTargetEntityToFlatRoleTarget } from 'src/engine/metadata-modules/flat-role-target/utils/from-role-target-entity-to-flat-role-target.util';
 import { RoleEntity } from 'src/engine/metadata-modules/role/role.entity';
+import { withAnansiRoleCacheReadFence } from 'src/engine/metadata-modules/role/services/anansi-role-cache-fence';
 import { RoleTargetEntity } from 'src/engine/metadata-modules/role-target/role-target.entity';
 import { InjectWorkspaceScopedRepository } from 'src/engine/twenty-orm/workspace-scoped-repository/inject-workspace-scoped-repository.decorator';
 import { WorkspaceScopedRepository } from 'src/engine/twenty-orm/workspace-scoped-repository/workspace-scoped-repository';
@@ -30,6 +31,8 @@ export class WorkspaceFlatRoleTargetMapCacheService extends WorkspaceCacheProvid
     private readonly roleRepository: WorkspaceScopedRepository<RoleEntity>,
     @InjectWorkspaceScopedRepository(AgentEntity)
     private readonly agentRepository: WorkspaceScopedRepository<AgentEntity>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {
     super();
   }
@@ -78,5 +81,16 @@ export class WorkspaceFlatRoleTargetMapCacheService extends WorkspaceCacheProvid
     }
 
     return flatRoleTargetMaps;
+  }
+
+  withCachePublicationFence<TResult>(
+    workspaceId: string,
+    operation: () => Promise<TResult>,
+  ): Promise<TResult> {
+    return withAnansiRoleCacheReadFence(
+      this.dataSource,
+      workspaceId,
+      operation,
+    );
   }
 }

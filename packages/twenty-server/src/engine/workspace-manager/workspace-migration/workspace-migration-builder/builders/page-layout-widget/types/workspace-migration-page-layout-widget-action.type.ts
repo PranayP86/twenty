@@ -18,7 +18,11 @@ export type UniversalUpdatePageLayoutWidgetAction =
   BaseUniversalUpdateWorkspaceMigrationAction<'pageLayoutWidget'>;
 
 export type UniversalDeletePageLayoutWidgetAction =
-  BaseUniversalDeleteWorkspaceMigrationAction<'pageLayoutWidget'>;
+  BaseUniversalDeleteWorkspaceMigrationAction<'pageLayoutWidget'> & {
+    expectedStateFingerprint?: string;
+  };
 
 export type FlatDeletePageLayoutWidgetAction =
-  BaseFlatDeleteWorkspaceMigrationAction<'pageLayoutWidget'>;
+  BaseFlatDeleteWorkspaceMigrationAction<'pageLayoutWidget'> & {
+    expectedStateFingerprint?: string;
+  };

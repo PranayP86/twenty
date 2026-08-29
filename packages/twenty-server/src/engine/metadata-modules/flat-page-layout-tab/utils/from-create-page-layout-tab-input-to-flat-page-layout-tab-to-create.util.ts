@@ -27,7 +27,7 @@ export const fromCreatePageLayoutTabInputToFlatPageLayoutTabToCreate = ({
     );
 
   const createdAt = new Date().toISOString();
-  const pageLayoutTabId = v4();
+  const pageLayoutTabId = createPageLayoutTabInput.id ?? v4();
 
   const { pageLayoutUniversalIdentifier } =
     resolveEntityRelationUniversalIdentifiers({

@@ -22,6 +22,7 @@ import { RoleTargetEntity } from 'src/engine/metadata-modules/role-target/role-t
 import { RoleEntity } from 'src/engine/metadata-modules/role/role.entity';
 import { RoleResolver } from 'src/engine/metadata-modules/role/role.resolver';
 import { RoleService } from 'src/engine/metadata-modules/role/role.service';
+import { AnansiManagedRoleService } from 'src/engine/metadata-modules/role/services/anansi-managed-role.service';
 import { WorkspaceFlatRoleMapCacheService } from 'src/engine/metadata-modules/role/services/workspace-flat-role-map-cache.service';
 import { RoleToolWorkspaceService } from 'src/engine/metadata-modules/role/tools/services/role-tool.workspace-service';
 import { WorkspaceRolesPermissionsCacheService } from 'src/engine/metadata-modules/role/services/workspace-roles-permissions-cache.service';
@@ -66,6 +67,7 @@ import { WorkspaceMigrationModule } from 'src/engine/workspace-manager/workspace
   ],
   providers: [
     RoleService,
+    AnansiManagedRoleService,
     RoleResolver,
     RoleToolWorkspaceService,
     WorkspaceFlatRoleMapCacheService,
@@ -82,6 +84,7 @@ import { WorkspaceMigrationModule } from 'src/engine/workspace-manager/workspace
   ],
   exports: [
     RoleService,
+    AnansiManagedRoleService,
     RoleToolWorkspaceService,
     WorkspaceFlatRoleMapCacheService,
     WorkspaceFlatRoleTargetMapCacheService,

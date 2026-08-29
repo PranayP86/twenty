@@ -10,6 +10,7 @@ import { ApplicationModule } from 'src/engine/core-modules/application/applicati
 import { ConnectionProviderOAuthController } from 'src/engine/core-modules/application/connection-provider/connection-provider-oauth.controller';
 import { ConnectionProviderModule } from 'src/engine/core-modules/application/connection-provider/connection-provider.module';
 import { ApplicationConnectionsModule } from 'src/engine/core-modules/application/connection-provider/connections/application-connections.module';
+import { AnansiManagedRoleController } from 'src/engine/core-modules/auth/controllers/anansi-managed-role.controller';
 import { GoogleAPIsAuthController } from 'src/engine/core-modules/auth/controllers/google-apis-auth.controller';
 import { GoogleAuthController } from 'src/engine/core-modules/auth/controllers/google-auth.controller';
 import { MicrosoftAPIsAuthController } from 'src/engine/core-modules/auth/controllers/microsoft-apis-auth.controller';
@@ -71,6 +72,7 @@ import { ConnectedAccountTokenEncryptionModule } from 'src/engine/metadata-modul
 import { MessageChannelEntity } from 'src/engine/metadata-modules/message-channel/entities/message-channel.entity';
 import { ObjectMetadataEntity } from 'src/engine/metadata-modules/object-metadata/object-metadata.entity';
 import { PermissionsModule } from 'src/engine/metadata-modules/permissions/permissions.module';
+import { RoleModule } from 'src/engine/metadata-modules/role/role.module';
 import { WorkspaceCacheModule } from 'src/engine/workspace-cache/workspace-cache.module';
 import { CalendarChannelSyncStatusService } from 'src/modules/calendar/common/services/calendar-channel-sync-status.service';
 import { ConnectedAccountModule } from 'src/modules/connected-account/connected-account.module';
@@ -120,6 +122,7 @@ import { JwtAuthStrategy } from './strategies/jwt.auth.strategy';
     ImpersonationAuthorizationModule,
     MetricsModule,
     PermissionsModule,
+    RoleModule,
     TwoFactorAuthenticationModule,
     ApiKeyModule,
     EventLogEmitterModule,
@@ -140,6 +143,7 @@ import { JwtAuthStrategy } from './strategies/jwt.auth.strategy';
     UserSessionModule,
   ],
   controllers: [
+    AnansiManagedRoleController,
     GoogleAuthController,
     MicrosoftAuthController,
     GoogleAPIsAuthController,

@@ -1,3 +1,5 @@
+import { AnansiApplicationRecordButton } from '@/anansi-applications/components/AnansiApplicationRecordButton';
+import { AnansiAgentRecordButton } from '@/anansi-agent/components/AnansiAgentRecordButton';
 import { RecordPageSidePanelCommandMenu } from '@/command-menu-item/components/RecordPageSidePanelCommandMenu';
 import { RecordPageSidePanelPinnedCommandMenuItems } from '@/command-menu-item/components/RecordPageSidePanelPinnedCommandMenuItems';
 import { InformationBannerDeletedRecord } from '@/information-banner/components/deleted-record/InformationBannerDeletedRecord';
@@ -118,6 +120,20 @@ export const PageLayoutRecordPageRenderer = ({
         {isInSidePanel && (
           <SidePanelFooter
             actions={[
+              <AnansiApplicationRecordButton
+                key="anansi-application"
+                objectNameSingular={
+                  targetRecordIdentifier.targetObjectNameSingular
+                }
+                recordId={targetRecordIdentifier.id}
+              />,
+              <AnansiAgentRecordButton
+                key="ask-anansi"
+                objectNameSingular={
+                  targetRecordIdentifier.targetObjectNameSingular
+                }
+                recordId={targetRecordIdentifier.id}
+              />,
               <RecordPageSidePanelCommandMenu key="options" />,
               ...(hasPinnedWidgetCommandMenuItems
                 ? pinnedWidgetCommandMenuItems.map((commandMenuItem) => (

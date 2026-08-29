@@ -130,10 +130,16 @@ export class PageLayoutWidgetResolver {
   async destroyPageLayoutWidget(
     @Args('id', { type: () => String }) id: string,
     @AuthWorkspace() workspace: WorkspaceEntity,
+    @Args('expectedStateFingerprint', {
+      type: () => String,
+      nullable: true,
+    })
+    expectedStateFingerprint?: string,
   ): Promise<boolean> {
     return this.pageLayoutWidgetService.destroy({
       id,
       workspaceId: workspace.id,
+      expectedStateFingerprint,
     });
   }
 

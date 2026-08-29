@@ -20,13 +20,17 @@ import { tokenPairState } from '@/auth/states/tokenPairState';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
 import { AnansiAutonomySection } from '~/pages/anansi/AnansiAutonomySection';
+import { AnansiBrowserConnectionCard } from '~/pages/anansi/AnansiBrowserConnectionCard';
+import { AnansiGmailConnectionCard } from '~/pages/anansi/AnansiGmailConnectionCard';
 import { AnansiResumeSection } from '~/pages/anansi/AnansiResumeSection';
 import { AnansiSearchSection } from '~/pages/anansi/AnansiSearchSection';
 import { AnansiAvailabilitySection } from '~/pages/anansi/AnansiAvailabilitySection';
 import {
+  ANANSI_AUTOMATION_CHUNKS,
   type AnansiAutomationChunk,
   type AnansiAutomationLevel,
   type AnansiAutomationMap,
+  type AnansiAuthorizationMode,
   type AnansiAwakeHours,
   type AnansiMeResponse,
   type AnansiPolicyDocument,
@@ -36,6 +40,7 @@ import {
   patchAnansiMe,
   patchAnansiTourSeen,
   postAnansiAutomation,
+  putAnansiAutomationMode,
   putAnansiPolicy,
 } from '~/pages/anansi/anansiProfileApi';
 
@@ -68,6 +73,7 @@ const EMPTY_AWAKE_HOURS: AnansiAwakeHours = { start: '', end: '' };
 
 type AnansiFieldKey =
   | AnansiAutomationChunk
+  | 'automation_all'
   | 'education_on_resume'
   | 'remote_only'
   | 'relocation'
@@ -79,11 +85,12 @@ export const AnansiProfilePage = () => {
   const { t } = useLingui();
   const tokenPair = useAtomStateValue(tokenPairState);
   const accessToken = tokenPair?.accessOrWorkspaceAgnosticToken.token;
+  // oxlint-disable-next-line twenty/no-state-useref
   const currentAccessTokenRef = useRef(accessToken);
   currentAccessTokenRef.current = accessToken;
   // ANANSI PATCH (WS-C): restart is persisted first, then handed to the
   // root-mounted overlay through Jotai.
-  const setIsTourRequested = useSetAtomState(anansiTourRequestedState);
+  const setAnansiTourRequested = useSetAtomState(anansiTourRequestedState);
   const [isRestartingTour, setIsRestartingTour] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -102,7 +109,9 @@ export const AnansiProfilePage = () => {
   const [isPolicyLoaded, setIsPolicyLoaded] = useState(false);
   const [me, setMe] = useState<AnansiMeResponse | null>(null);
   const [policy, setPolicy] = useState<AnansiPolicyDocument>({});
+  const [policyVersion, setPolicyVersion] = useState<number>();
   const [automation, setAutomation] = useState<AnansiAutomationMap>({});
+  const [isSavingAutoAll, setIsSavingAutoAll] = useState(false);
   const [rateFloorDraft, setRateFloorDraft] = useState('');
   const [awakeHoursDraft, setAwakeHoursDraft] =
     useState<AnansiAwakeHours>(EMPTY_AWAKE_HOURS);
@@ -115,6 +124,7 @@ export const AnansiProfilePage = () => {
   // pattern AnansiProvisioningScreen uses -- reset on every (re-)mount, not
   // just cleared on unmount, so StrictMode's dev-only double-invoke can't
   // leave it stuck `false`.
+  // oxlint-disable-next-line twenty/no-state-useref
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
@@ -162,6 +172,7 @@ export const AnansiProfilePage = () => {
 
     if (policyResult.status === 'fulfilled') {
       setPolicy(policyResult.value.policy);
+      setPolicyVersion(policyResult.value.version);
       setAutomation(policyResult.value.policy.automation ?? {});
       setRateFloorDraft(
         isDefined(policyResult.value.policy.rate_floor)
@@ -213,7 +224,7 @@ export const AnansiProfilePage = () => {
         return;
       }
       setMe(response);
-      setIsTourRequested({
+      setAnansiTourRequested({
         accessToken,
         tourStateRevision: response.tour_state_revision,
       });
@@ -223,7 +234,7 @@ export const AnansiProfilePage = () => {
     } finally {
       setIsRestartingTour(false);
     }
-  }, [accessToken, isRestartingTour, setIsTourRequested]);
+  }, [accessToken, isRestartingTour, setAnansiTourRequested]);
 
   const handleToggleAutomation = useCallback(
     async (chunk: AnansiAutomationChunk, nextOn: boolean) => {
@@ -246,6 +257,9 @@ export const AnansiProfilePage = () => {
           level,
         );
         setAutomation(nextAutomation);
+        setPolicyVersion((current) =>
+          isDefined(current) ? current + 1 : current,
+        );
         // ANANSI PATCH (WS-B final review I1): keep `policy.automation` in
         // sync with the live automation map on every successful toggle.
         // updatePolicyField PUTs the WHOLE policy document (the server
@@ -256,12 +270,77 @@ export const AnansiProfilePage = () => {
         // plus overlaying the latest map in updatePolicyField below, closes
         // that window from both sides.
         setPolicy((current) => ({ ...current, automation: nextAutomation }));
-      } catch (error) {
+      } catch {
         setAutomation((current) => ({ ...current, [chunk]: previousLevel }));
         setFieldError(chunk, saveErrorMessage);
       }
     },
     [accessToken, automation, saveErrorMessage, setFieldError],
+  );
+
+  const handleSetAllAutomation = useCallback(
+    async (nextOn: boolean) => {
+      if (
+        !isDefined(accessToken) ||
+        !isDefined(policyVersion) ||
+        isSavingAutoAll
+      ) {
+        return;
+      }
+
+      const mode: AnansiAuthorizationMode = nextOn
+        ? 'auto_now'
+        : 'review_first';
+      const level: AnansiAutomationLevel = nextOn ? 2 : 1;
+      const previousAutomation = automation;
+      const optimisticAutomation = Object.fromEntries(
+        ANANSI_AUTOMATION_CHUNKS.map((chunk) => [chunk, level]),
+      );
+
+      setIsSavingAutoAll(true);
+      setAutomation(optimisticAutomation);
+      setFieldError('automation_all', undefined);
+
+      try {
+        const response = await putAnansiAutomationMode(
+          accessToken,
+          mode,
+          policyVersion,
+        );
+        if (
+          !isMountedRef.current ||
+          currentAccessTokenRef.current !== accessToken
+        ) {
+          return;
+        }
+        setAutomation(response.automation);
+        setPolicyVersion(response.version);
+        setPolicy((current) => ({
+          ...current,
+          automation: response.automation,
+        }));
+      } catch {
+        if (
+          isMountedRef.current &&
+          currentAccessTokenRef.current === accessToken
+        ) {
+          setAutomation(previousAutomation);
+          setFieldError('automation_all', saveErrorMessage);
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setIsSavingAutoAll(false);
+        }
+      }
+    },
+    [
+      accessToken,
+      automation,
+      isSavingAutoAll,
+      policyVersion,
+      saveErrorMessage,
+      setFieldError,
+    ],
   );
 
   const updatePolicyField = useCallback(
@@ -292,7 +371,8 @@ export const AnansiProfilePage = () => {
       try {
         const response = await putAnansiPolicy(accessToken, optimisticPolicy);
         setPolicy(response.policy);
-      } catch (error) {
+        setPolicyVersion(response.version);
+      } catch {
         setPolicy((current) => ({ ...current, [patchKey]: previousValue }));
         setFieldError(key, saveErrorMessage);
         if (key === 'rate_floor') {
@@ -394,7 +474,7 @@ export const AnansiProfilePage = () => {
           timezone: nextTimezone,
         });
         setMe(response);
-      } catch (error) {
+      } catch {
         setMe((current) =>
           current ? { ...current, timezone: previousTimezone } : current,
         );
@@ -431,7 +511,7 @@ export const AnansiProfilePage = () => {
       });
       setMe(response);
       setAwakeHoursDraft(response.awake_hours ?? awakeHoursDraft);
-    } catch (error) {
+    } catch {
       setMe((current) =>
         current ? { ...current, awake_hours: previousAwakeHours } : current,
       );
@@ -477,6 +557,9 @@ export const AnansiProfilePage = () => {
       <AnansiAutonomySection
         automation={automation}
         errors={errors}
+        autoAllError={errors.automation_all}
+        isSavingAutoAll={isSavingAutoAll}
+        onSetAll={handleSetAllAutomation}
         onToggleChunk={handleToggleAutomation}
       />
       <AnansiResumeSection
@@ -485,6 +568,11 @@ export const AnansiProfilePage = () => {
         disabled={!isPolicyLoaded}
         onToggleEducation={handleToggleEducationOnResume}
       />
+      <AnansiGmailConnectionCard
+        accessToken={accessToken}
+        returnTarget="profile"
+      />
+      <AnansiBrowserConnectionCard accessToken={accessToken} />
       <AnansiSearchSection
         remoteOnly={Boolean(policy.remote_only)}
         relocation={Boolean(policy.relocation)}

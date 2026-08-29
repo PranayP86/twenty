@@ -100,6 +100,7 @@ server/worker ERROR or Last Contact failure. Live recent-session rows showed one
 authenticated browser proof after this release remains required.
 
 ## Anansi Fork Status (2026-08-23)
+## Anansi Fork Status (2026-08-27)
 
 Work only from Morona repo `/home/pran/Developer/anansi-twenty`. Current local
 branch `fix/anansi-onboarding-live-feedback` split from `4e29087c74`. Walkthrough
@@ -141,6 +142,144 @@ in `node_modules` because the vendor ELF loader is not NixOS-compatible. A
 focused Yarn install also omitted several cached `@types/lodash.*`, `pluralize`,
 and `@oxlint/plugins` packages; validation uses the locally restored cache
 copies without manifest or lockfile changes.
+
+**Friend provisioning recovery (2026-08-26, LOCAL ONLY):** Uncommitted worktree
+`fix/friend-provision-recovery`, based on `44899c8317`, adds deterministic UUIDv5
+workspace creation from a server-validated user identity. Per-user and global
+PostgreSQL advisory locks make replay idempotent and serialize workspace-cap and
+first-admin decisions. Replay repairs billing while the workspace-created event
+remains one-shot. Browser recovery stores only a token-free user-scoped intent
+and exact workspace identity; failed storage stops before mutation. Reload,
+lost-response, concurrent-tab, activation, renewal, and explicit retry paths
+reuse that workspace. Metadata operations have 60-second deadlines; Core
+provisioning keeps its 90-second explicit retry. Stock existing-user workspace
+creation does not set Anansi recovery state, and central-domain failures show a
+visible error. Full `twenty-front` passes 1055 suites/6474 tests/139 snapshots;
+full `twenty-server` under `TZ=UTC` passes 837 suites/6168 tests/116 snapshots
+with 4 suites and 15 tests skipped. Focused frontend passes 10 suites/90 tests;
+focused server passes 4 suites/33 tests. Both typechecks and changed-source
+formatting pass. Server Oxlint is clean; frontend Oxlint reports only three known
+pre-existing `no-state-useref` findings in `AnansiProvisioningScreen.tsx`.
+Generated metadata files intentionally retain their generator format; do not run
+Prettier over them because it creates a 59,000-line incidental diff. The current
+generated change is exactly one identity-field line in each file. No
+commit, push, PR, merge, image build, deployment, OAuth flow, browser launch, or
+live-data mutation occurred. Do not release before supported self-service Gmail
+and a deployed fresh-user end-to-end proof. Anansi handoff:
+`docs/handoffs/2026-08-26-friend-readiness.md` in the Anansi repo.
+
+**Self-service Gmail card (2026-08-27, LOCAL ONLY):** This same uncommitted
+worktree now captures only exact Anansi completion fragments, removes them from
+the URL even when `sessionStorage` is blocked, and mounts one reusable Gmail card
+on wizard screen 7 and same-tab Profile. First connection uses Core's signed-in
+email hint. Add and reconnect force Google account choice. Profile supports
+several mailboxes, labels one healthy mailbox **Main application email**, changes
+primary, and requires confirmed logical disconnect. Wizard policy and availability
+drafts save before OAuth; a token-free marker returns to screen 7. Completion
+handles HTTP 202/503, ambiguous status refresh, bearer replacement, same-token
+request reordering, and stale cross-user feedback without storing Twenty tokens or
+Google authorization URLs. HTTP 202/503 completion retries use four bounded
+exponential retries, then preserve the nonce for visible manual recovery. Focused
+proof passes 44 tests across fragment, card, Profile, and wizard suites.
+`twenty-front` typecheck, focused type-aware Oxlint with zero warnings, Oxfmt,
+diff, and scoped Gitleaks checks pass. Final independent review raised one React
+StrictMode risk; direct StrictMode reproduction passed without a production
+change because the bearer-reset effect clears transient completion state during
+the second development effect pass. Mandatory Gmail
+finish gating remains intentionally off until Core readiness and browser runtime
+land. No OAuth publication, consent, real mailbox mutation, commit, push, PR,
+merge, deployment, or browser launch occurred. Memory:
+`anansi-twenty-gmail-card`.
+
+**Extension and application UI (2026-08-27, LOCAL ONLY):** Profile, onboarding,
+and Job application controls now filter devices by exact extension and workspace
+origin, strictly validate Core responses and extension versions, isolate all
+asynchronous work by bearer identity, and never pass a Twenty bearer to extension
+messaging. Core owns terminal application state. Non-runnable `prepared` attempts
+stay disabled, while terminal attempts no longer require local Chrome. Assist-only
+and explicit remote-fallback behavior remain fail-closed. Focused proof passes 5
+suites and 85/85 tests, including 43/43 application and 17/17 wizard tests;
+`twenty-front` typecheck, type-aware Oxlint, Oxfmt, diff, and scoped Gitleaks pass.
+Independent review found no issue. Signed-in Twenty still has no safe bearer API
+for answer provenance, review packets, or unresolved questions, so exact unavailable
+placeholders remain until Core task 46 lands. Production extension ID also remains
+unknown until separately authorized Web Store item creation. No browser, commit,
+push, publication, deployment, OAuth flow, or live-data mutation occurred. Memory:
+`anansi-local-browser-readiness`.
+
+**Remote review origin (2026-08-27, LOCAL ONLY):** One-use review URL validation
+now uses shared `ANANSI_BROWSER_PUBLIC_ORIGIN=https://browser.anansi.work`, matching
+Core settings, inactive browser deployment config, Service annotation, and deployment
+tests. The old inline `review.anansi.work` hostname is rejected. The exact application
+button suite passes 63/63 tests, `twenty-front` typecheck passes, type-aware
+Oxlint reports zero warnings, and Oxfmt accepts all three changed files. No tunnel, DNS, browser, deployment, commit, or live-data change
+occurred. Public routing still reaches Twenty until separately authorized Task 42.
+
+**Manual application handoff (2026-08-28, LOCAL ONLY):** Review and full-control
+handoffs bind the authenticated Core user, Twenty record, application attempt, remote
+session, control grant, packet digest, exact state, and all three state versions. One
+preopened isolated popup avoids popup blockers; it closes on logout, record change,
+unmount, terminal resolution, and Stop. Strict per-attempt `sessionStorage` state preserves
+the original authorization key before the request. It adds the exact receipt only after
+Core proves the same key through a valid response or idempotent replay. A competing `409`
+removes pending authority and leaves only generic manual confirmation. This recovers
+committed-response loss and same-tab reload or record navigation without storing the
+control URL, fragment token, bearer, or document content. Refreshed Core state replaces
+stale handoff tuples. Active remote sessions, including `control_ready`, can be stopped
+with their exact version; Core expires manual authority and keeps any possible submission
+outcome nonretryable. Lost Stop responses reconcile from Core; a pre-commit failure
+closes unrestricted control but re-enables exact-version Stop and both durable outcome
+controls. Lost resolution responses reconcile before another action. Exact proof passes
+99/99 application-button tests. `twenty-front` typecheck, type-aware Oxlint with zero
+warnings and errors, Oxfmt, diff, and scoped Gitleaks checks pass. Final focused re-review
+found no issue. No browser, commit, push, publication, deployment, OAuth flow, email send,
+application submit, or live-data change occurred.
+
+**Ask Anansi record dock (2026-08-27, LOCAL ONLY):** A global minimizable dock
+now mounts from `RootAppProviders` and opens through side-panel record footers.
+Immutable stacked tabs bind exact Task/Approval, Engagement, JobPosting/Job,
+Touchpoint, Resume, and Interview/CalendarEvent contexts. Exact custom-record
+`anansiId` values resolve Core records; malformed, ambiguous, ApplicationAttempt,
+and AnansiStatus contexts render no button until Core supports them. Bearer tokens
+are used only to reopen context and submit messages. Poll requests carry only a
+thread-bound `X-Anansi-Agent-Poll` capability, which remains in component state and
+never enters Jotai or browser storage. Stable-session changes remount the session.
+Access-token or context-scope changes synchronously increment a request generation;
+every asynchronous load, reopen, poll, POST, retry timer, error, and final state
+update verifies it before changing UI state. Pending turns recover from repeated
+transient poll failures. Accepted POSTs stay pending by exact message ID until polling
+observes that message, so transient receipt-poll failures cannot strand a turn.
+Automatic poll and bearer-reopen recovery uses bounded 1.5-second then 3-second
+backoff and stops after three failures. Permanent failures and exhausted retries keep
+the turn pending with a manual `Retry` control, preventing unbounded requests from
+mounted inactive tabs without allowing duplicate accepted work. Unchanged retries
+after an uncertain POST reuse one client key. Loading and pending states block
+duplicate submission. Minimized and inactive panels stay mounted to preserve drafts
+and poll capabilities. Unsupported object names use own-property checks, so inherited
+keys fail closed. Tabs use separate tab and close buttons with focus recovery. Exact
+proof passes 6 suites and 39 tests. Full `twenty-front` passes 1,063 suites, 6,543
+tests, and 139 snapshots. `twenty-front` typecheck, focused type-aware Oxlint with
+zero warnings, Oxfmt, diff, and scoped Gitleaks checks pass. Final review found no
+surviving issue. No browser launch, commit, push, PR, merge, deployment, model
+command, or live data change occurred.
+
+**Complete Anansi automation expansion (2026-08-26, APPROVED FOR LOCAL
+IMPLEMENTATION):** Preserve friend provisioning recovery. Screen 7 stays the
+seventh onboarding screen but will require a reusable multi-Gmail card, extension
+or remote-browser readiness, resume/roles, and `Review first` versus immediate
+`Auto now`. Profile gets Gmail primary/reconnect/disconnect, labels primary as
+**Main application email**, uses that verified address for new resumes/forms/mail,
+browser pairing,
+remote fallback, `Auto all`, and per-chunk controls. An item-bound Ask Anansi dock
+will use `PageLayoutRecordPageRenderer.tsx` for Task and every Anansi-managed
+record popout; Core, not Twenty's stock agent backend, owns threads and typed tools.
+Greenhouse, Lever, and Ashby may auto-submit after exact gates. LinkedIn, Indeed,
+Dice, Wellfound, challenges, and unsupported portals remain human-submit. The
+managed dashboard expands through Core-owned ApplicationAttempt/AnansiStatus
+projections. No local browser is allowed. No commit, push, publication, deployment,
+OAuth consent, real email send, or real application submission is authorized.
+Design sources are the three `2026-08-26` Gmail/contextual-agent/apply-engine specs
+in the Anansi repository.
 
 ## Key Commands
 

@@ -11,7 +11,7 @@ import {
   type DataSource,
   type QueryRunner,
 } from 'typeorm';
-import { v4 } from 'uuid';
+import { v4, v5 } from 'uuid';
 
 import { POSTGRESQL_ERROR_CODES } from 'src/engine/api/graphql/workspace-query-runner/constants/postgres-error-codes.constants';
 import { USER_SIGNUP_EVENT_NAME } from 'src/engine/api/graphql/workspace-query-runner/constants/user-signup-event-name.constants';
@@ -58,6 +58,7 @@ import { MetricsKeys } from 'src/engine/core-modules/metrics/types/metrics-keys.
 import { OnboardingService } from 'src/engine/core-modules/onboarding/onboarding.service';
 import { TelemetryEventType } from 'src/engine/core-modules/telemetry/telemetry-event.type';
 import { TwentyConfigService } from 'src/engine/core-modules/twenty-config/twenty-config.service';
+import { UserWorkspaceEntity } from 'src/engine/core-modules/user-workspace/user-workspace.entity';
 import { UserWorkspaceService } from 'src/engine/core-modules/user-workspace/user-workspace.service';
 import { UserService } from 'src/engine/core-modules/user/services/user.service';
 import { UserEntity } from 'src/engine/core-modules/user/user.entity';
@@ -582,7 +583,11 @@ export class SignInUpService {
 
   async signUpOnNewWorkspace(
     userData: ExistingUserOrPartialUserWithPicture['userData'],
-    options?: { displayName?: string; subdomain?: string },
+    options?: {
+      displayName?: string;
+      subdomain?: string;
+      anansiWorkspaceCreationIdentity?: string;
+    },
   ) {
     const email =
       userData.type === 'newUserWithPicture'
@@ -599,7 +604,19 @@ export class SignInUpService {
       );
     }
 
-    await this.assertWorkspaceCreationAllowed(userData);
+    const anansiWorkspaceCreationIdentity =
+      options?.anansiWorkspaceCreationIdentity;
+
+    if (
+      isDefined(anansiWorkspaceCreationIdentity) &&
+      (userData.type !== 'existingUser' ||
+        anansiWorkspaceCreationIdentity !== userData.existingUser.id)
+    ) {
+      throw new AuthException(
+        'Anansi workspace creation identity does not match the current user',
+        AuthExceptionCode.INVALID_INPUT,
+      );
+    }
 
     const displayName = options?.displayName?.trim();
 
@@ -621,17 +638,68 @@ export class SignInUpService {
       );
     }
 
-    const shouldGrantServerAdmin = !(await this.hasServerAdmin());
-
     const isWorkEmailFound = isWorkEmail(email);
 
-    const workspaceId = v4();
-    const workspaceCustomApplicationId = v4();
+    const workspaceId = isDefined(anansiWorkspaceCreationIdentity)
+      ? v5(`anansi-workspace:${anansiWorkspaceCreationIdentity}`, v5.URL)
+      : v4();
+    const workspaceCustomApplicationId = isDefined(
+      anansiWorkspaceCreationIdentity,
+    )
+      ? v5(
+          `anansi-workspace-application:${anansiWorkspaceCreationIdentity}`,
+          v5.URL,
+        )
+      : v4();
 
     try {
-      const { user, workspace } = await this.dataSource.transaction(
+      const { user, workspace, isReplay } = await this.dataSource.transaction(
         async (entityManager) => {
           const queryRunner = entityManager.queryRunner as QueryRunner;
+
+          if (isDefined(anansiWorkspaceCreationIdentity)) {
+            if (userData.type !== 'existingUser') {
+              throw new AuthException(
+                'Anansi workspace creation requires an existing user',
+                AuthExceptionCode.INVALID_INPUT,
+              );
+            }
+
+            await queryRunner.query(
+              'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+              [`anansi-workspace:${anansiWorkspaceCreationIdentity}`],
+            );
+
+            const existingMembership = await queryRunner.manager.findOne(
+              UserWorkspaceEntity,
+              {
+                where: {
+                  userId: userData.existingUser.id,
+                  workspaceId,
+                },
+              },
+            );
+
+            if (isDefined(existingMembership)) {
+              const existingWorkspace =
+                await queryRunner.manager.findOneByOrFail(WorkspaceEntity, {
+                  id: workspaceId,
+                });
+
+              return {
+                user: userData.existingUser,
+                workspace: existingWorkspace,
+                isReplay: true,
+              };
+            }
+          }
+
+          await queryRunner.query(
+            'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+            ['workspace-creation'],
+          );
+          await this.assertWorkspaceCreationAllowed(userData);
+          const shouldGrantServerAdmin = !(await this.hasServerAdmin());
 
           const workspaceToCreate = this.workspaceRepository.create({
             id: workspaceId,
@@ -754,13 +822,15 @@ export class SignInUpService {
             );
           }
 
-          return { user, workspace };
+          return { user, workspace, isReplay: false };
         },
       );
 
-      void this.eventLogEmitterService
-        .createContext({ workspaceId })
-        .insertWorkspaceEvent(WORKSPACE_CREATED_EVENT, {});
+      if (!isReplay) {
+        void this.eventLogEmitterService
+          .createContext({ workspaceId })
+          .insertWorkspaceEvent(WORKSPACE_CREATED_EVENT, {});
+      }
 
       if (this.billingService.isBillingEnabled()) {
         await this.billingService.ensureBillingCustomer({

@@ -4,6 +4,7 @@ import { isDefined } from 'twenty-shared/utils';
 import { In, IsNull, Not } from 'typeorm';
 
 import { ApiKeyEntity } from 'src/engine/core-modules/api-key/api-key.entity';
+import { AnansiApiKeyAdminSafetyService } from 'src/engine/core-modules/api-key/services/anansi-api-key-admin-safety.service';
 import {
   ApiKeyException,
   ApiKeyExceptionCode,
@@ -34,6 +35,7 @@ export class ApiKeyRoleService {
     private readonly apiKeyRepository: WorkspaceScopedRepository<ApiKeyEntity>,
     private readonly workspaceCacheService: WorkspaceCacheService,
     private readonly roleTargetService: RoleTargetService,
+    private readonly anansiApiKeyAdminSafetyService: AnansiApiKeyAdminSafetyService,
   ) {}
 
   public async assignRoleToApiKey({
@@ -45,24 +47,35 @@ export class ApiKeyRoleService {
     roleId: string;
     workspaceId: string;
   }): Promise<void> {
-    const validationResult = await this.validateAssignRoleInput({
-      apiKeyId,
+    return this.anansiApiKeyAdminSafetyService.runWithWorkspaceMutationLock(
       workspaceId,
-      roleId,
-    });
+      async (manager) => {
+        const validationResult = await this.validateAssignRoleInput({
+          apiKeyId,
+          workspaceId,
+          roleId,
+        });
 
-    if (validationResult?.roleToAssignIsSameAsCurrentRole) {
-      return;
-    }
+        if (validationResult.roleToAssignIsSameAsCurrentRole) {
+          return;
+        }
 
-    await this.roleTargetService.create({
-      createRoleTargetInput: {
-        roleId,
-        targetId: apiKeyId,
-        targetMetadataForeignKey: 'apiKeyId',
+        await this.anansiApiKeyAdminSafetyService.assertCanChangeApiKeyRole({
+          manager,
+          workspaceId,
+          apiKey: validationResult.apiKey,
+          role: validationResult.role,
+        });
+        await this.roleTargetService.create({
+          createRoleTargetInput: {
+            roleId,
+            targetId: apiKeyId,
+            targetMetadataForeignKey: 'apiKeyId',
+          },
+          workspaceId,
+        });
       },
-      workspaceId,
-    });
+    );
   }
 
   async getRoleIdForApiKeyId(
@@ -173,6 +186,8 @@ export class ApiKeyRoleService {
 
     return {
       roleToAssignIsSameAsCurrentRole: Boolean(existingRoleTarget),
+      apiKey,
+      role,
     };
   }
 

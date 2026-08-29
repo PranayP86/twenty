@@ -33,6 +33,10 @@ import { currentWorkspaceState } from '@/auth/states/currentWorkspaceState';
 import { returnToPathState } from '@/auth/states/returnToPathState';
 import { tokenPairState } from '@/auth/states/tokenPairState';
 import { clearSessionLocalStorageKeys } from '@/auth/utils/clearSessionLocalStorageKeys';
+import {
+  getPendingAnansiProvisioningWorkspace,
+  setPendingAnansiProvisioningWorkspace,
+} from '@/auth/utils/anansiProvisioningRecovery';
 import { broadcastSignOutToOtherTabs } from '@/auth/utils/crossTabSignOut';
 import { isValidReturnToPath } from '@/auth/utils/isValidReturnToPath';
 import { isNonEmptyString } from '@sniptt/guards';
@@ -147,6 +151,7 @@ export const useAuth = () => {
     async (
       availableWorkspaces: Parameters<typeof countAvailableWorkspaces>[0],
       email: string,
+      currentUserId: string,
     ) => {
       const availableWorkspacesCount =
         countAvailableWorkspaces(availableWorkspaces);
@@ -157,8 +162,38 @@ export const useAuth = () => {
       const wantsToCreateNewWorkspace =
         new URLSearchParams(window.location.search).get('action') ===
         'create-new-workspace';
+      const pendingProvisioningWorkspace = isMultiWorkspaceEnabled
+        ? getPendingAnansiProvisioningWorkspace(currentUserId)
+        : null;
+      const canResumePendingProvisioning =
+        isMultiWorkspaceEnabled &&
+        isDefined(pendingProvisioningWorkspace) &&
+        pendingProvisioningWorkspace.email.toLowerCase() ===
+          email.toLowerCase() &&
+        pendingProvisioningWorkspace.anansiWorkspaceCreationIdentity ===
+          currentUserId;
+
+      if (canResumePendingProvisioning) {
+        await apolloClient.query({
+          query: GetWorkspaceCreationDefaultsDocument,
+        });
+        setSignInUpStep(SignInUpStep.WorkspaceCreation);
+        return;
+      }
 
       if (availableWorkspacesCount === 0 || wantsToCreateNewWorkspace) {
+        if (isMultiWorkspaceEnabled && availableWorkspacesCount === 0) {
+          const didSaveProvisioningIntent =
+            setPendingAnansiProvisioningWorkspace({
+              anansiWorkspaceCreationIdentity: currentUserId,
+              email,
+            });
+
+          if (!didSaveProvisioningIntent) {
+            throw new Error('Could not save workspace setup state');
+          }
+        }
+
         await apolloClient.query({
           query: GetWorkspaceCreationDefaultsDocument,
         });
@@ -184,7 +219,12 @@ export const useAuth = () => {
 
       setSignInUpStep(SignInUpStep.WorkspaceSelection);
     },
-    [apolloClient, redirectToWorkspaceDomain, setSignInUpStep],
+    [
+      apolloClient,
+      isMultiWorkspaceEnabled,
+      redirectToWorkspaceDomain,
+      setSignInUpStep,
+    ],
   );
 
   const handleGetLoginTokenFromCredentials = useCallback(
@@ -276,6 +316,7 @@ export const useAuth = () => {
       await navigateAfterMultiWorkspaceSignInUp(
         user.availableWorkspaces,
         user.email,
+        user.id,
       );
     },
     [
@@ -376,6 +417,7 @@ export const useAuth = () => {
           await navigateAfterMultiWorkspaceSignInUp(
             user.availableWorkspaces,
             user.email,
+            user.id,
           );
         },
         onError: (error) => {
@@ -430,6 +472,7 @@ export const useAuth = () => {
       await navigateAfterMultiWorkspaceSignInUp(
         user.availableWorkspaces,
         user.email,
+        user.id,
       );
     },
     [

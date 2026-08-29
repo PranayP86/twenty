@@ -5,6 +5,7 @@ import { IsNull } from 'typeorm';
 import { type QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
 import { ApiKeyEntity } from 'src/engine/core-modules/api-key/api-key.entity';
+import { AnansiApiKeyAdminSafetyService } from 'src/engine/core-modules/api-key/services/anansi-api-key-admin-safety.service';
 import {
   ApiKeyException,
   ApiKeyExceptionCode,
@@ -25,6 +26,7 @@ export class ApiKeyService {
     private readonly jwtWrapperService: JwtWrapperService,
     private readonly roleTargetService: RoleTargetService,
     private readonly workspaceCacheService: WorkspaceCacheService,
+    private readonly anansiApiKeyAdminSafetyService: AnansiApiKeyAdminSafetyService,
   ) {}
 
   async create(
@@ -34,28 +36,42 @@ export class ApiKeyService {
     },
   ): Promise<ApiKeyEntity> {
     const { roleId, workspaceId, ...apiKeyFields } = apiKeyData;
-    const savedApiKey = await this.apiKeyRepository.insertAndReturnOne(
+
+    return this.anansiApiKeyAdminSafetyService.runWithWorkspaceMutationLock(
       workspaceId,
-      apiKeyFields,
-    );
-
-    try {
-      await this.roleTargetService.create({
-        createRoleTargetInput: {
+      async (manager) => {
+        await this.anansiApiKeyAdminSafetyService.assertCanCreateApiKey({
+          manager,
+          workspaceId,
           roleId,
-          targetId: savedApiKey.id,
-          targetMetadataForeignKey: 'apiKeyId',
-        },
-        workspaceId: savedApiKey.workspaceId,
-      });
-    } catch (error) {
-      await this.apiKeyRepository.delete(workspaceId, { id: savedApiKey.id });
-      throw error;
-    }
+        });
 
-    await this.invalidateApiKeyCache(savedApiKey.workspaceId);
+        const savedApiKey = await this.apiKeyRepository.insertAndReturnOne(
+          workspaceId,
+          apiKeyFields,
+        );
 
-    return savedApiKey;
+        try {
+          await this.roleTargetService.create({
+            createRoleTargetInput: {
+              roleId,
+              targetId: savedApiKey.id,
+              targetMetadataForeignKey: 'apiKeyId',
+            },
+            workspaceId: savedApiKey.workspaceId,
+          });
+        } catch (error) {
+          await this.apiKeyRepository.delete(workspaceId, {
+            id: savedApiKey.id,
+          });
+          throw error;
+        }
+
+        await this.invalidateApiKeyCache(savedApiKey.workspaceId);
+
+        return savedApiKey;
+      },
+    );
   }
 
   async findById(
@@ -85,16 +101,26 @@ export class ApiKeyService {
     workspaceId: string,
     updateData: QueryDeepPartialEntity<ApiKeyEntity>,
   ): Promise<ApiKeyEntity | null> {
-    const apiKey = await this.findById(id, workspaceId);
+    return this.anansiApiKeyAdminSafetyService.runWithWorkspaceMutationLock(
+      workspaceId,
+      async (manager) => {
+        const apiKey = await this.findById(id, workspaceId);
 
-    if (!apiKey) {
-      return null;
-    }
+        if (!apiKey) {
+          return null;
+        }
 
-    await this.apiKeyRepository.update(workspaceId, { id }, updateData);
-    await this.invalidateApiKeyCache(workspaceId);
+        await this.anansiApiKeyAdminSafetyService.assertCanUpdateApiKey({
+          manager,
+          workspaceId,
+          apiKey,
+        });
+        await this.apiKeyRepository.update(workspaceId, { id }, updateData);
+        await this.invalidateApiKeyCache(workspaceId);
 
-    return this.findById(id, workspaceId);
+        return this.findById(id, workspaceId);
+      },
+    );
   }
 
   async revoke(id: string, workspaceId: string): Promise<ApiKeyEntity | null> {

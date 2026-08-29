@@ -33,6 +33,7 @@ import { UserWorkspaceEntity } from 'src/engine/core-modules/user-workspace/user
 import { UserWorkspaceService } from 'src/engine/core-modules/user-workspace/user-workspace.service';
 import { UserService } from 'src/engine/core-modules/user/services/user.service';
 import { UserEntity } from 'src/engine/core-modules/user/user.entity';
+import { AuthProviderEnum } from 'src/engine/core-modules/workspace/types/workspace.type';
 import { PermissionsService } from 'src/engine/metadata-modules/permissions/permissions.service';
 
 import { AuthResolver } from './auth.resolver';
@@ -46,8 +47,12 @@ import { TransientTokenService } from './token/services/transient-token.service'
 
 describe('AuthResolver', () => {
   let resolver: AuthResolver;
+  let loginTokenService: LoginTokenService;
   let resetPasswordService: ResetPasswordService;
+  let signInUpService: SignInUpService;
   let throttlerService: ThrottlerService;
+  let userService: UserService;
+  let workspaceDomainsService: WorkspaceDomainsService;
   const mock_CaptchaGuard: CanActivate = { canActivate: jest.fn(() => true) };
 
   beforeEach(async () => {
@@ -76,7 +81,9 @@ describe('AuthResolver', () => {
         },
         {
           provide: UserService,
-          useValue: {},
+          useValue: {
+            findUserByIdOrThrow: jest.fn(),
+          },
         },
         {
           provide: WorkspaceDomainsService,
@@ -84,6 +91,7 @@ describe('AuthResolver', () => {
             buildWorkspaceURL: jest
               .fn()
               .mockResolvedValue(new URL('http://localhost:3001')),
+            getWorkspaceUrls: jest.fn(),
           },
         },
         {
@@ -112,7 +120,9 @@ describe('AuthResolver', () => {
         },
         {
           provide: SignInUpService,
-          useValue: {},
+          useValue: {
+            signUpOnNewWorkspace: jest.fn(),
+          },
         },
         {
           provide: ApiKeyService,
@@ -138,7 +148,9 @@ describe('AuthResolver', () => {
         },
         {
           provide: LoginTokenService,
-          useValue: {},
+          useValue: {
+            generateLoginToken: jest.fn(),
+          },
         },
         {
           provide: WorkspaceAgnosticTokenService,
@@ -199,13 +211,76 @@ describe('AuthResolver', () => {
       .compile();
 
     resolver = module.get<AuthResolver>(AuthResolver);
+    loginTokenService = module.get<LoginTokenService>(LoginTokenService);
     resetPasswordService =
       module.get<ResetPasswordService>(ResetPasswordService);
+    signInUpService = module.get<SignInUpService>(SignInUpService);
     throttlerService = module.get<ThrottlerService>(ThrottlerService);
+    userService = module.get<UserService>(UserService);
+    workspaceDomainsService = module.get<WorkspaceDomainsService>(
+      WorkspaceDomainsService,
+    );
   });
 
   it('should be defined', () => {
     expect(resolver).toBeDefined();
+  });
+
+  it('forwards the authenticated Anansi workspace identity to idempotent signup', async () => {
+    const currentUser = {
+      id: '11111111-1111-4111-8111-111111111111',
+    };
+    const fullUser = {
+      ...currentUser,
+      email: 'friend@gmail.com',
+    } as UserEntity;
+    const workspace = {
+      id: 'workspace-id',
+    };
+    const input = {
+      displayName: 'Friend Workspace',
+      anansiWorkspaceCreationIdentity: currentUser.id,
+    };
+    const loginToken = {
+      token: 'login-token',
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    };
+    const workspaceUrls = {
+      subdomainUrl: 'https://friend.example.com',
+      customUrl: null,
+    };
+
+    (userService.findUserByIdOrThrow as jest.Mock).mockResolvedValue(fullUser);
+    (signInUpService.signUpOnNewWorkspace as jest.Mock).mockResolvedValue({
+      user: fullUser,
+      workspace,
+    });
+    (loginTokenService.generateLoginToken as jest.Mock).mockResolvedValue(
+      loginToken,
+    );
+    (workspaceDomainsService.getWorkspaceUrls as jest.Mock).mockReturnValue(
+      workspaceUrls,
+    );
+
+    await expect(
+      resolver.signUpInNewWorkspace(
+        currentUser as never,
+        AuthProviderEnum.Google,
+        input,
+      ),
+    ).resolves.toEqual({
+      loginToken,
+      workspace: { id: workspace.id, workspaceUrls },
+    });
+
+    expect(signInUpService.signUpOnNewWorkspace).toHaveBeenCalledWith(
+      { type: 'existingUser', existingUser: fullUser },
+      {
+        displayName: input.displayName,
+        subdomain: undefined,
+        anansiWorkspaceCreationIdentity: input.anansiWorkspaceCreationIdentity,
+      },
+    );
   });
 
   describe('emailPasswordResetLink', () => {
